@@ -1,17 +1,25 @@
 name: 🤖 Monitor PowerBI
 
 on:
-  # Ejecutar automáticamente cada hora (minuto 0 de cada hora)
+  # Ejecutar automáticamente cada hora
   schedule:
     - cron: '0 * * * *'
 
-  # También permite ejecutarlo manualmente desde GitHub
+  # Permite ejecutarlo manualmente desde GitHub (botón "Run workflow")
   workflow_dispatch:
+    inputs:
+      modo:
+        description: 'manual = siempre responde por Telegram aunque no haya cambio'
+        required: false
+        default: 'manual'
+        type: choice
+        options:
+          - manual
+          - auto
 
 jobs:
   check-powerbi:
     runs-on: ubuntu-latest
-    # Permisos para que el job pueda guardar el estado en el repositorio
     permissions:
       contents: write
 
@@ -19,7 +27,6 @@ jobs:
       - name: 📥 Clonar repositorio
         uses: actions/checkout@v4
         with:
-          # Trae el historial completo para que podamos hacer commit
           fetch-depth: 0
 
       - name: 🐍 Configurar Python
@@ -33,16 +40,22 @@ jobs:
       - name: 🌐 Instalar Chromium
         run: playwright install chromium --with-deps
 
-      - name: 🔍 Revisar PowerBI y notificar si hay cambios
+      - name: 🔍 Revisar PowerBI y notificar
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python check_and_notify.py
+        run: |
+          # Si es disparo manual, pasa "check" como argumento
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python check_and_notify.py check
+          else
+            python check_and_notify.py
+          fi
 
-      - name: 💾 Guardar estado actualizado en el repositorio
+      - name: 💾 Guardar estado en repositorio
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add last_record.txt || true
-          git diff --staged --quiet || git commit -m "chore: actualizar último RecordUpdate"
+          git diff --staged --quiet || git commit -m "chore: actualizar RecordUpdate"
           git push || true
