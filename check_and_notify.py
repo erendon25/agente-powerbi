@@ -72,20 +72,57 @@ async def extract_record_update() -> str | None:
             args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
             headless=True
         )
-        page = await browser.new_page()
+        # Simular un navegador real con user-agent de Windows Chrome
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            viewport={"width": 1920, "height": 1080},
+            locale="es-PE"
+        )
+        page = await context.new_page()
 
-        print("⏳ Cargando PowerBI (puede tomar hasta 60 segundos)...")
+        print("⏳ Cargando PowerBI...")
         try:
-            # Aumentamos el tiempo de espera a 90 segundos
             await page.goto(URL_POWERBI, wait_until="networkidle", timeout=90000)
-        except Exception:
-            # Si networkidle falla, igual esperamos el DOM
-            print("⚠️ networkidle timeout, esperando domcontentloaded...")
-            await page.goto(URL_POWERBI, wait_until="domcontentloaded", timeout=90000)
+        except Exception as e:
+            print(f"⚠️ networkidle timeout ({e}), continuando con domcontentloaded...")
+            try:
+                await page.goto(URL_POWERBI, wait_until="domcontentloaded", timeout=90000)
+            except Exception as e2:
+                print(f"❌ Error cargando página: {e2}")
 
-        # Esperamos 30 segundos para que los gráficos de PowerBI terminen de renderizar
-        print("⏳ Esperando 30 segundos para renderizado completo...")
-        await page.wait_for_timeout(30000)
+        # Intentar aceptar diálogos de cookies / consentimiento
+        print("🍪 Buscando diálogos de consentimiento...")
+        consent_selectors = [
+            "button:has-text('Accept')",
+            "button:has-text('Aceptar')",
+            "button:has-text('I accept')",
+            "button:has-text('Continue')",
+            "button:has-text('OK')",
+            "[id*='accept']",
+            "[class*='accept']",
+            "[class*='consent']",
+        ]
+        for sel in consent_selectors:
+            try:
+                btn = page.locator(sel).first
+                if await btn.is_visible(timeout=2000):
+                    await btn.click()
+                    print(f"  ✅ Hice clic en: {sel}")
+                    await page.wait_for_timeout(2000)
+            except Exception:
+                pass
+
+        # Guardar screenshot de diagnóstico ANTES de esperar (para ver qué hay)
+        print("📸 Guardando screenshot inicial...")
+        await page.screenshot(path="screenshot_inicio.png", full_page=False)
+
+        # Esperar 45 segundos para renderizado completo
+        print("⏳ Esperando 45 segundos para renderizado completo...")
+        await page.wait_for_timeout(45000)
+
+        # Screenshot después de esperar
+        print("📸 Guardando screenshot final...")
+        await page.screenshot(path="screenshot_final.png", full_page=False)
 
         text_content = ""
         for frame in page.frames:
@@ -95,11 +132,13 @@ async def extract_record_update() -> str | None:
             except Exception:
                 pass
 
+        await context.close()
         await browser.close()
 
-    print(f"📄 Texto extraído ({len(text_content)} chars). Primeros 500:")
-    print(text_content[:500])
-    print("---")
+    print(f"📄 Texto total extraído: {len(text_content)} caracteres")
+    print("=== INICIO TEXTO EXTRAÍDO ===")
+    print(text_content[:3000])  # Imprimir más texto para diagnóstico
+    print("=== FIN TEXTO EXTRAÍDO ===")
 
     match = re.search(
         r"RecordUpdate\s*([\d]{1,2}\s*-\s*[A-Za-z]{3}\s*\d{1,2}\s*:\s*\d{2})",
