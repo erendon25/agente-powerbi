@@ -59,3 +59,14 @@ jobs:
           git add last_record.txt || true
           git diff --staged --quiet || git commit -m "chore: actualizar RecordUpdate"
           git push || true
+
+      - name: 📸 Subir screenshots de diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: powerbi-screenshots
+          path: |
+            screenshot_inicio.png
+            screenshot_final.png
+          if-no-files-found: warn
+          retention-days: 3
