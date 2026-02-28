@@ -112,15 +112,16 @@ async def extract_record_update() -> str | None:
             except Exception:
                 pass
 
-        # Guardar screenshot de diagnóstico ANTES de esperar (para ver qué hay)
+        # Guardar screenshot de diagnóstico
         print("📸 Guardando screenshot inicial...")
         await page.screenshot(path="screenshot_inicio.png", full_page=False)
 
-        # Esperar 45 segundos para renderizado completo
-        print("⏳ Esperando 45 segundos para renderizado completo...")
-        await page.wait_for_timeout(45000)
+        # Esperar solo 12 segundos — el PowerBI ya cargó (según screenshot)
+        # Esperar más de ~20s causa que el reporte se auto-recargue (el problema anterior)
+        print("⏳ Esperando 12 segundos para renderizado final...")
+        await page.wait_for_timeout(12000)
 
-        # Screenshot después de esperar
+        # Screenshot final
         print("📸 Guardando screenshot final...")
         await page.screenshot(path="screenshot_final.png", full_page=False)
 
@@ -140,17 +141,35 @@ async def extract_record_update() -> str | None:
     print(text_content[:3000])  # Imprimir más texto para diagnóstico
     print("=== FIN TEXTO EXTRAÍDO ===")
 
+    # El texto "RecordUpdate" puede aparecer partido en múltiples líneas en el HTML.
+    # Por ejemplo: "RecordUpdat\ne" o "RecordUpdat e" o "RecordUpdate"
+    # Normalizamos el texto para unir esas partes antes de buscar con regex.
+    text_normalizado = re.sub(r'RecordUpdat\s*e', 'RecordUpdate', text_content, flags=re.IGNORECASE)
+
+    # Regex 1: Busca "RecordUpdate" seguido del patrón de fecha (ej: "27 - FEB 17:58")
     match = re.search(
-        r"RecordUpdate\s*([\d]{1,2}\s*-\s*[A-Za-z]{3}\s*\d{1,2}\s*:\s*\d{2})",
-        text_content,
+        r"RecordUpdate\s*([\d]{1,2}\s*-\s*[A-Za-z]{3}\s*[\d]{1,2}\s*:\s*[\d]{2})",
+        text_normalizado,
         re.IGNORECASE
     )
+
+    if not match:
+        # Regex 2 (fallback): Busca el patrón de fecha directamente en el texto
+        # sin depender de la palabra "RecordUpdate"
+        match = re.search(
+            r"([\d]{1,2}\s*-\s*[A-Za-z]{3}\s*[\d]{1,2}\s*:\s*[\d]{2})",
+            text_normalizado,
+            re.IGNORECASE
+        )
+        if match:
+            print("⚠️ Encontrado vía regex fallback (sin prefijo RecordUpdate)")
+
     if match:
         value = match.group(1).strip()
-        print(f"✅ RecordUpdate encontrado: '{value}'")
+        print(f"✅ Valor encontrado: '{value}'")
         return value
     else:
-        print("⚠️ RecordUpdate NO encontrado en el texto extraído.")
+        print("⚠️ No se encontró el patrón de fecha en el texto extraído.")
         return None
 
 # ─────────────────────────────────────────────
