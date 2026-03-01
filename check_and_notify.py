@@ -27,23 +27,13 @@ MESES_ES = {
     7:"Jul",8:"Ago",9:"Set",10:"Oct",11:"Nov",12:"Dic"
 }
 
-# Coordenadas calibradas para viewport 767×730 (verificadas en sesión anterior)
-# Filtro Mes
-MES_HEADER    = (65, 163)   # clic para abrir/cerrar dropdown Mes
-MES_SEL_TODO  = (31, 290)   # "Seleccionar todo"
-MES_FEB       = (31, 330)   # opción "Feb"
+# Coordenadas de los HEADERS de los slicers (posición fija, no cambia)
+# Viewport 767×730 verificado en sesión real
+MES_HEADER    = (65, 163)   # abrir/cerrar dropdown Mes
+SUP_HEADER    = (65, 210)   # abrir/cerrar dropdown Supervisor
+VIS_HEADER    = (65, 249)   # abrir/cerrar dropdown Nro. Visita
 
-# Filtro Supervisor
-SUP_HEADER    = (65, 210)   # clic para abrir/cerrar dropdown Supervisor
-SUP_YOHN      = (31, 465)   # opción "YOHN"
-
-# Filtro Nro. Visita
-VIS_HEADER    = (65, 249)   # clic para abrir/cerrar dropdown Nro. Visita
-VIS_SEL_TODO  = (31, 270)   # "Seleccionar todo"
-VIS_1         = (31, 290)   # opción "Visita 1"
-VIS_2         = (31, 310)   # opción "Visita 2"
-
-# Barras "Top Places" (click para filtrar por tienda)
+# Barras "Top Places" (posición fija en el gráfico)
 BAR_PORONGOCHE      = (430, 355)
 BAR_MALL_PORONGOCHE = (716, 355)
 AREA_NEUTRAL        = (500, 20)  # clic neutro para deseleccionar tienda
@@ -107,6 +97,43 @@ async def px(page, x, y, wait_ms=1200):
     await page.mouse.click(x, y)
     await page.wait_for_timeout(wait_ms)
 
+# ── Búsqueda automática de opciones en los frames de Power BI ────────────────
+async def click_option_in_frames(page, option_text: str, wait_ms: int = 1000) -> bool:
+    """
+    Busca 'option_text' en todos los frames de la página y hace clic.
+    Funciona con cualquier mes, supervisor, visita — sin coordenadas hardcodeadas.
+    """
+    for frame in page.frames:
+        try:
+            # Buscar coincidencia exacta primero
+            loc = frame.get_by_text(option_text, exact=True)
+            if await loc.count() > 0:
+                await loc.first.click()
+                await page.wait_for_timeout(wait_ms)
+                print(f"    ✅ Clic en '{option_text}' (frame: {frame.url[:60]})")
+                return True
+        except Exception:
+            pass
+        try:
+            # Fallback: coincidencia parcial con locator de texto
+            loc = frame.locator(f"span:text('{option_text}'), div:text('{option_text}')")
+            if await loc.count() > 0:
+                await loc.first.click()
+                await page.wait_for_timeout(wait_ms)
+                print(f"    ✅ Clic en '{option_text}' fallback")
+                return True
+        except Exception:
+            pass
+    print(f"    ⚠️ No se encontró '{option_text}' en ningún frame")
+    return False
+
+async def deselect_all_in_frames(page) -> bool:
+    """Hace clic en 'Seleccionar todo' para deseleccionar todas las opciones."""
+    for text in ["Seleccionar todo", "Select all"]:
+        if await click_option_in_frames(page, text, wait_ms=600):
+            return True
+    return False
+
 # ── Extracción principal (1 sola carga de página) ─────────────────────────────
 async def extract_full_report() -> dict:
     # Mes actual en hora Peru (UTC-5)
@@ -165,41 +192,42 @@ async def extract_full_report() -> dict:
         result["record_update"] = parse_record_update(await page_text(page))
         print(f"🔖 RecordUpdate: {result['record_update']}")
 
-        # ── Aplicar filtro Mes = mes_actual ───────────────────────────────────
+        # ── Aplicar filtro Mes = mes_actual (automático) ─────────────────────
         print(f"🗓️  Aplicando filtro Mes = {mes_actual}...")
         await px(page, *MES_HEADER)           # abrir dropdown
-        await px(page, *MES_SEL_TODO)         # deseleccionar todo
-        await px(page, *MES_SEL_TODO)         # click extra por si toggle
-        # Buscar la posición correcta del mes (depende de qué meses existen)
-        # Feb suele ser el 2° item; ajustar si el mes cambia
-        await px(page, *MES_FEB, wait_ms=800) # seleccionar mes actual (Feb)
+        await page.wait_for_timeout(800)
+        await deselect_all_in_frames(page)    # deseleccionar todo
+        await deselect_all_in_frames(page)    # doble click por si es toggle
+        await click_option_in_frames(page, mes_actual)  # seleccionar mes actual
         await px(page, *MES_HEADER)           # cerrar dropdown
         await page.wait_for_timeout(2000)
 
-        # ── Aplicar filtro Supervisor = YOHN ──────────────────────────────────
+        # ── Aplicar filtro Supervisor = YOHN (automático) ─────────────────────
         print("👤 Aplicando filtro Supervisor = YOHN...")
         await px(page, *SUP_HEADER)
-        await px(page, *SUP_YOHN)
+        await page.wait_for_timeout(800)
+        await click_option_in_frames(page, "YOHN")
         await px(page, *SUP_HEADER)
         await page.wait_for_timeout(2000)
         await page.screenshot(path="screenshot_filtros.png")
 
         # ── Extraer scores por tienda × visita ───────────────────────────────
         combos = [
-            ("Visita 1", VIS_1,  BAR_PORONGOCHE,      "PORONGOCHE"),
-            ("Visita 2", VIS_2,  BAR_PORONGOCHE,      "PORONGOCHE"),
-            ("Visita 1", VIS_1,  BAR_MALL_PORONGOCHE, "MALL PORONGOCHE"),
-            ("Visita 2", VIS_2,  BAR_MALL_PORONGOCHE, "MALL PORONGOCHE"),
+            ("Visita 1", BAR_PORONGOCHE,      "PORONGOCHE"),
+            ("Visita 2", BAR_PORONGOCHE,      "PORONGOCHE"),
+            ("Visita 1", BAR_MALL_PORONGOCHE, "MALL PORONGOCHE"),
+            ("Visita 2", BAR_MALL_PORONGOCHE, "MALL PORONGOCHE"),
         ]
 
-        for visita, vis_coord, bar_coord, tienda in combos:
+        for visita, bar_coord, tienda in combos:
             print(f"  → {tienda} | {visita}")
             try:
-                # Seleccionar solo esta visita
+                # Seleccionar solo esta visita (automático por texto)
                 await px(page, *VIS_HEADER)
-                await px(page, *VIS_SEL_TODO)   # deselect all
-                await px(page, *vis_coord)       # select visita N
-                await px(page, *VIS_HEADER)      # cerrar
+                await page.wait_for_timeout(600)
+                await deselect_all_in_frames(page)            # deseleccionar todo
+                await click_option_in_frames(page, visita)    # seleccionar "Visita 1" o "Visita 2"
+                await px(page, *VIS_HEADER)                   # cerrar
                 await page.wait_for_timeout(1000)
 
                 # Clic en la barra de la tienda en Top Places
