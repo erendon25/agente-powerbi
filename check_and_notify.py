@@ -32,11 +32,7 @@ MESES_ES = {
 MES_HEADER    = (65, 163)   # abrir/cerrar dropdown Mes
 SUP_HEADER    = (65, 210)   # abrir/cerrar dropdown Supervisor
 VIS_HEADER    = (65, 249)   # abrir/cerrar dropdown Nro. Visita
-
-# Barras "Top Places" (posición fija en el gráfico)
-BAR_PORONGOCHE      = (430, 355)
-BAR_MALL_PORONGOCHE = (716, 355)
-AREA_NEUTRAL        = (500, 20)  # clic neutro para deseleccionar tienda
+AREA_NEUTRAL  = (500, 20)   # clic neutro para deseleccionar row de tabla
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
 def send_telegram(message: str):
@@ -70,14 +66,36 @@ async def page_text(page) -> str:
 
 # ── Parsear el Success Rate del texto ─────────────────────────────────────────
 def parse_success_rate(text: str) -> str | None:
-    # Busca "97\n%\nSucess Rate" o "97%\nSucess Rate" o variantes
-    for pat in [
-        r"(\d{1,3})\s*\n*\s*%\s*\n*\s*Suce?ss\s*Rate",
-        r"Suce?ss\s*Rate\s*\n*\s*(\d{1,3})\s*%?",
-    ]:
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            return m.group(1) + "%"
+    """
+    En Power BI, el donut de 'Sucess Rate' tiene el LABEL primero en el DOM
+    y el VALOR porcentual aparece varias lineas despues.
+    Normalizamos el texto y buscamos el primer % despues del label.
+    """
+    normalized = " ".join(text.split())
+
+    # Estrategia 1: primer % despues del label 'Sucess Rate' (hasta 400 chars)
+    m = re.search(r"Suce?ss\s*Rat[^%]{0,400}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            print(f"    📊 Score (patrón 1): {val}%")
+            return str(val) + "%"
+
+    # Estrategia 2: buscar en sección Resumen General
+    m = re.search(r"Resumen General[^%]{0,400}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            print(f"    📊 Score (patrón 2 Resumen): {val}%")
+            return str(val) + "%"
+
+    # Fallback: primer % razonable en el texto (excluye 100 y 0)
+    all_pct = re.findall(r"(\d{1,3})\s*%", normalized)
+    non_100 = [int(x) for x in all_pct if 0 < int(x) < 100]
+    if non_100:
+        print(f"    ⚠️ Fallback: {non_100[0]}% (encontrados: {all_pct[:8]})")
+        return str(non_100[0]) + "%"
+
     return None
 
 # ── Parsear RecordUpdate ───────────────────────────────────────────────────────
@@ -100,38 +118,63 @@ async def px(page, x, y, wait_ms=1200):
 # ── Búsqueda automática de opciones en los frames de Power BI ────────────────
 async def click_option_in_frames(page, option_text: str, wait_ms: int = 1000) -> bool:
     """
-    Busca 'option_text' en todos los frames de la página y hace clic.
-    Funciona con cualquier mes, supervisor, visita — sin coordenadas hardcodeadas.
+    Busca 'option_text' en todos los frames y hace clic.
+    Usa exact=False para tolerar espacios extra o texto parcial.
     """
     for frame in page.frames:
-        try:
-            # Buscar coincidencia exacta primero
-            loc = frame.get_by_text(option_text, exact=True)
-            if await loc.count() > 0:
-                await loc.first.click()
-                await page.wait_for_timeout(wait_ms)
-                print(f"    ✅ Clic en '{option_text}' (frame: {frame.url[:60]})")
-                return True
-        except Exception:
-            pass
-        try:
-            # Fallback: coincidencia parcial con locator de texto
-            loc = frame.locator(f"span:text('{option_text}'), div:text('{option_text}')")
-            if await loc.count() > 0:
-                await loc.first.click()
-                await page.wait_for_timeout(wait_ms)
-                print(f"    ✅ Clic en '{option_text}' fallback")
-                return True
-        except Exception:
-            pass
+        for loc_expr in [
+            lambda f: f.get_by_text(option_text, exact=False),
+            lambda f: f.locator(f"span:text-is('{option_text}')"),
+            lambda f: f.locator(f"div:text-is('{option_text}')"),
+            lambda f: f.locator(f"[title='{option_text}']"),
+            lambda f: f.locator(f"[aria-label*='{option_text}']"),
+        ]:
+            try:
+                loc = loc_expr(frame)
+                cnt = await loc.count()
+                if cnt > 0:
+                    await loc.first.click()
+                    await page.wait_for_timeout(wait_ms)
+                    print(f"    ✅ Clic en '{option_text}'")
+                    return True
+            except Exception:
+                pass
     print(f"    ⚠️ No se encontró '{option_text}' en ningún frame")
     return False
 
 async def deselect_all_in_frames(page) -> bool:
-    """Hace clic en 'Seleccionar todo' para deseleccionar todas las opciones."""
+    """Hace clic en 'Seleccionar todo' / 'Select all'."""
     for text in ["Seleccionar todo", "Select all"]:
         if await click_option_in_frames(page, text, wait_ms=600):
             return True
+    return False
+
+# ── Clic en fila de tabla por texto (no depende de coordenadas) ───────────────
+async def click_table_row(page, tienda: str, visita: str) -> bool:
+    """
+    Busca la fila de la tabla que contiene 'tienda' y 'visita' y hace clic.
+    Robusto: no depende de la posicion de las barras en Top Places.
+    """
+    row_selectors = ["tr", "div[role='row']", "[class*='row']", "[class*='tableRow']"]
+    for frame in page.frames:
+        for sel in row_selectors:
+            try:
+                rows = frame.locator(sel)
+                count = await rows.count()
+                for i in range(count):
+                    row = rows.nth(i)
+                    try:
+                        row_text = await row.inner_text(timeout=1000)
+                        if tienda in row_text and visita in row_text:
+                            await row.click()
+                            await page.wait_for_timeout(2000)
+                            print(f"    ✅ Fila encontrada y clickeada: {tienda} / {visita}")
+                            return True
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+    print(f"    ⚠️ Sin fila para: {tienda} / {visita} (visita no registrada)")
     return False
 
 # ── Extracción principal (1 sola carga de página) ─────────────────────────────
@@ -213,34 +256,43 @@ async def extract_full_report() -> dict:
 
         # ── Extraer scores por tienda × visita ───────────────────────────────
         combos = [
-            ("Visita 1", BAR_PORONGOCHE,      "PORONGOCHE"),
-            ("Visita 2", BAR_PORONGOCHE,      "PORONGOCHE"),
-            ("Visita 1", BAR_MALL_PORONGOCHE, "MALL PORONGOCHE"),
-            ("Visita 2", BAR_MALL_PORONGOCHE, "MALL PORONGOCHE"),
+            ("Visita 1", "PORONGOCHE"),
+            ("Visita 2", "PORONGOCHE"),
+            ("Visita 1", "MALL PORONGOCHE"),
+            ("Visita 2", "MALL PORONGOCHE"),
         ]
 
-        for visita, bar_coord, tienda in combos:
+        for visita, tienda in combos:
             print(f"  → {tienda} | {visita}")
             try:
-                # Seleccionar solo esta visita (automático por texto)
+                # 1. Seleccionar solo esta visita en el filtro
                 await px(page, *VIS_HEADER)
                 await page.wait_for_timeout(600)
-                await deselect_all_in_frames(page)            # deseleccionar todo
-                await click_option_in_frames(page, visita)    # seleccionar "Visita 1" o "Visita 2"
-                await px(page, *VIS_HEADER)                   # cerrar
+                await deselect_all_in_frames(page)
+                await click_option_in_frames(page, visita)
+                await px(page, *VIS_HEADER)
                 await page.wait_for_timeout(1000)
 
-                # Clic en la barra de la tienda en Top Places
-                await px(page, *bar_coord, wait_ms=2000)
+                # 2. Clic en la fila de la tabla (por texto de tienda+visita)
+                #    NO usamos coordenadas del grafico Top Places porque
+                #    las barras cambian de posicion segun el ranking de notas.
+                found_row = await click_table_row(page, tienda, visita)
 
-                # Leer score
+                if not found_row:
+                    # Si no hay fila para esta combinacion, no hay visita registrada
+                    result["tiendas"][tienda][visita] = "Sin visita"
+                    await px(page, *AREA_NEUTRAL, wait_ms=500)
+                    continue
+
+                # 3. Leer Success Rate
                 text = await page_text(page)
+                excerpt = " ".join(text.split())[:600]
+                print(f"    📄 Texto (600c): {excerpt}")
                 score = parse_success_rate(text)
                 result["tiendas"][tienda][visita] = score or "N/D"
-                print(f"     ✅ {score}")
 
-                # Clic neutro para deseleccionar tienda
-                await px(page, *AREA_NEUTRAL, wait_ms=1000)
+                # 4. Clic neutro para deseleccionar la fila
+                await px(page, *AREA_NEUTRAL, wait_ms=800)
 
             except Exception as e:
                 print(f"     ❌ Error: {e}")
