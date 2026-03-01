@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import threading
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from playwright.async_api import async_playwright
 from telegram import Update
@@ -30,8 +31,197 @@ TOKEN = os.getenv("TELEGRAM_TOKEN", "8759492692:AAHwjW2Lho1wynrFLpct_FxAO4bVFapK
 CHAT_ID = None   # Se guarda automáticamente cuando haces /start
 LAST_RECORD = None
 
+# Tiendas a reportar
+TIENDAS = ["PORONGOCHE", "MALL PORONGOCHE"]
+TIENDA_EMOJIS = {"PORONGOCHE": "🏪", "MALL PORONGOCHE": "🏬"}
+
+# Meses en español
+MESES_ES = {
+    1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr",
+    5: "May", 6: "Jun", 7: "Jul", 8: "Ago",
+    9: "Set", 10: "Oct", 11: "Nov", 12: "Dic"
+}
+
+async def get_page_text(page) -> str:
+    text_content = ""
+    for frame in page.frames:
+        try:
+            text = await frame.inner_text("body", timeout=5000)
+            text_content += text + "\n"
+        except Exception:
+            pass
+    return text_content
+
+async def click_filter_option(page, filter_label: str, option_text: str, deselect_all_first: bool = False):
+    """Intenta abrir el slicer con filter_label y seleccionar option_text."""
+    slicers = page.locator("visual-container")
+    count = await slicers.count()
+    for i in range(count):
+        slicer = slicers.nth(i)
+        try:
+            slicer_text = await slicer.inner_text(timeout=3000)
+            if filter_label.lower() in slicer_text.lower():
+                if deselect_all_first:
+                    try:
+                        select_all = slicer.locator("span:has-text('Seleccionar todo'), span:has-text('Select all')")
+                        if await select_all.count() > 0:
+                            await select_all.first.click()
+                            await page.wait_for_timeout(500)
+                            await select_all.first.click()
+                            await page.wait_for_timeout(500)
+                    except Exception:
+                        pass
+                try:
+                    option = slicer.locator(f"span:has-text('{option_text}')")
+                    if await option.count() > 0:
+                        await option.first.click()
+                        await page.wait_for_timeout(1000)
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return False
+
+async def extract_full_report() -> dict:
+    """
+    Extrae notas por Nro. de Visita para el mes actual
+    para Porongoche y Mall Porongoche bajo supervisor YOHN.
+    """
+    now = datetime.utcnow()
+    mes_actual = MESES_ES[now.month]
+    consent_selectors = [
+        "button:has-text('Accept')", "button:has-text('Aceptar')",
+        "button:has-text('I accept')", "button:has-text('Continue')",
+        "button:has-text('OK')", "[id*='accept']", "[class*='consent']",
+    ]
+
+    result = {
+        "record_update": None,
+        "mes": mes_actual,
+        "tiendas": {t: {} for t in TIENDAS}
+    }
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+            headless=True
+        )
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            viewport={"width": 1920, "height": 1080},
+            locale="es-PE"
+        )
+        page = await context.new_page()
+
+        # Carga inicial para sacar RecordUpdate
+        try:
+            await page.goto(URL, wait_until="networkidle", timeout=90000)
+        except Exception:
+            await page.goto(URL, wait_until="domcontentloaded", timeout=90000)
+
+        for sel in consent_selectors:
+            try:
+                btn = page.locator(sel).first
+                if await btn.is_visible(timeout=2000):
+                    await btn.click()
+                    await page.wait_for_timeout(1000)
+            except Exception:
+                pass
+
+        await page.wait_for_timeout(12000)
+        text_inicial = await get_page_text(page)
+
+        # Extraer RecordUpdate
+        text_norm = re.sub(r'RecordUpdat\s*e', 'RecordUpdate', text_inicial, flags=re.IGNORECASE)
+        m = re.search(r"RecordUpdate\s*([\d]{1,2}\s*-\s*[A-Za-z]{3}\s*[\d]{1,2}\s*:\s*[\d]{2})", text_norm, re.IGNORECASE)
+        if m:
+            result["record_update"] = m.group(1).strip()
+
+        visitas = ["Visita 1", "Visita 2"]
+
+        for tienda in TIENDAS:
+            for visita in visitas:
+                try:
+                    try:
+                        await page.goto(URL, wait_until="networkidle", timeout=90000)
+                    except Exception:
+                        await page.goto(URL, wait_until="domcontentloaded", timeout=90000)
+                    await page.wait_for_timeout(10000)
+
+                    for sel in consent_selectors:
+                        try:
+                            btn = page.locator(sel).first
+                            if await btn.is_visible(timeout=1000):
+                                await btn.click()
+                                await page.wait_for_timeout(500)
+                        except Exception:
+                            pass
+
+                    await click_filter_option(page, "Mes", mes_actual, deselect_all_first=True)
+                    await page.wait_for_timeout(1500)
+                    await click_filter_option(page, "Supervisor", "YOHN", deselect_all_first=True)
+                    await page.wait_for_timeout(1500)
+                    await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True)
+                    await page.wait_for_timeout(1500)
+
+                    # Filtrar por tienda haciendo clic en "Top Places"
+                    try:
+                        tienda_label = page.locator(f"text={tienda}").last
+                        if await tienda_label.is_visible(timeout=3000):
+                            await tienda_label.click()
+                            await page.wait_for_timeout(2000)
+                    except Exception:
+                        pass
+
+                    text = await get_page_text(page)
+
+                    # Buscar Success Rate
+                    score = None
+                    sr_match = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", text, re.IGNORECASE)
+                    if sr_match:
+                        score = sr_match.group(1) + "%"
+                    else:
+                        matches = re.findall(r"(\d{1,3})\s*%", text)
+                        non_100 = [m for m in matches if m != "100"]
+                        if non_100:
+                            score = non_100[0] + "%"
+                        elif matches:
+                            score = matches[0] + "%"
+
+                    result["tiendas"][tienda][visita] = score or "N/D"
+                except Exception as e:
+                    result["tiendas"][tienda][visita] = "Error"
+                    print(f"Error {tienda} {visita}: {e}")
+
+        await context.close()
+        await browser.close()
+
+    return result
+
+def format_report_message(report: dict) -> str:
+    mes = report.get("mes", "?")
+    record = report.get("record_update", "?")
+    tiendas = report.get("tiendas", {})
+    lineas = [
+        f"📊 *Reporte Mystery Client — {mes} 2026*",
+        f"🕐 RecordUpdate: `{record}`",
+        "",
+    ]
+    for tienda, visitas in tiendas.items():
+        emoji = TIENDA_EMOJIS.get(tienda, "🏪")
+        lineas.append(f"{emoji} *{tienda}*")
+        if visitas:
+            for nro_visita, nota in visitas.items():
+                lineas.append(f"   • {nro_visita}: `{nota}`")
+        else:
+            lineas.append("   • Sin datos disponibles")
+        lineas.append("")
+    lineas.append(f"[Ver PowerBI]({URL})")
+    return "\n".join(lineas)
+
 async def extract_record_update():
-    """Abre el PowerBI de forma invisible y extrae el RecordUpdate."""
+    """Para compatibilidad con el check_job (solo el RecordUpdate)."""
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(
@@ -39,7 +229,6 @@ async def extract_record_update():
                 headless=True
             )
             page = await browser.new_page()
-
             await page.goto(URL, wait_until="networkidle", timeout=60000)
             await page.wait_for_timeout(15000)
 
@@ -53,22 +242,18 @@ async def extract_record_update():
 
             await browser.close()
 
+            text_norm = re.sub(r'RecordUpdat\s*e', 'RecordUpdate', text_content, flags=re.IGNORECASE)
             match = re.search(
                 r"RecordUpdate\s*([\d]{1,2}\s*-\s*[A-Za-z]{3}\s*\d{1,2}\s*:\s*\d{2})",
-                text_content,
-                re.IGNORECASE
+                text_norm, re.IGNORECASE
             )
-
-            if match:
-                return match.group(1).strip()
-            else:
-                return None
+            return match.group(1).strip() if match else None
     except Exception as e:
-        print(f"Error extrayendo datos: {e}")
+        print(f"Error extrayendo RecordUpdate: {e}")
         return None
 
 async def check_job(context: ContextTypes.DEFAULT_TYPE):
-    """Job periódico: revisa PowerBI y avisa si cambió."""
+    """Job periódico: revisa PowerBI y avisa si cambió con reporte detallado."""
     global LAST_RECORD, CHAT_ID
     if not CHAT_ID:
         return
@@ -77,9 +262,13 @@ async def check_job(context: ContextTypes.DEFAULT_TYPE):
 
     if current_record and current_record != LAST_RECORD:
         LAST_RECORD = current_record
+        # Generar reporte detallado
+        report = await extract_full_report()
+        report["record_update"] = current_record
+        mensaje = format_report_message(report)
         await context.bot.send_message(
             chat_id=CHAT_ID,
-            text=f"🔴 *¡RecordUpdate cambió!*\nNuevo valor: `{LAST_RECORD}`",
+            text=mensaje,
             parse_mode="Markdown"
         )
     else:
@@ -98,24 +287,25 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✅ *Bot iniciado correctamente!*\n\n"
         "Revisaré tu PowerBI cada hora y te avisaré si cambia.\n\n"
         "Comandos disponibles:\n"
-        "• /reporte → Ver la nota ahora mismo\n"
+        "• /reporte → Ver notas por visita del mes actual\n"
         "• /intervalo 60 → Revisar cada 60 minutos\n"
         "• /intervalo 1 → Revisar cada 1 minuto",
         parse_mode="Markdown"
     )
 
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Revisión inmediata a pedido."""
-    await update.message.reply_text("🔍 Revisando PowerBI... (espera ~20 segundos).")
-    current_record = await extract_record_update()
+    """Revisión inmediata con reporte detallado por visita y tienda."""
+    await update.message.reply_text("🔍 Revisando PowerBI... (espera ~60 segundos).")
 
-    if current_record:
-        await update.message.reply_text(
-            f"📊 *RecordUpdate actual:*\n`{current_record}`",
-            parse_mode="Markdown"
-        )
+    report = await extract_full_report()
+
+    if report.get("record_update"):
+        mensaje = format_report_message(report)
+        await update.message.reply_text(mensaje, parse_mode="Markdown")
     else:
-        await update.message.reply_text("⚠️ No encontré el RecordUpdate en este momento. Puede ser un error de carga.")
+        await update.message.reply_text(
+            "⚠️ No pude leer los datos del PowerBI en este momento. Puede ser un error de carga."
+        )
 
 async def set_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cambia el intervalo de revisión automática."""
