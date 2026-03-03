@@ -130,10 +130,37 @@ def parse_record_update(text: str) -> str | None:
     m = re.search(r"([\d]{1,2}\s*-\s*[A-Za-z]{3}\s*[\d]{1,2}\s*:\s*[\d]{2})", t, re.IGNORECASE)
     return m.group(1).strip() if m else None
 
-# ── Pixel click helper ─────────────────────────────────────────────────────────
-async def px(page, x, y, wait_ms=1200):
-    await page.mouse.click(x, y)
-    await page.wait_for_timeout(wait_ms)
+# ── Búsqueda automática en visual-containers ─────────────────────────────────
+async def click_filter_option(page, filter_label: str, option_text: str, deselect_all_first: bool = False):
+    """Intenta abrir el slicer con filter_label y seleccionar option_text."""
+    slicers = page.locator("visual-container")
+    count = await slicers.count()
+    for i in range(count):
+        slicer = slicers.nth(i)
+        try:
+            slicer_text = await slicer.inner_text(timeout=3000)
+            if filter_label.lower() in slicer_text.lower():
+                if deselect_all_first:
+                    try:
+                        select_all = slicer.locator("span:has-text('Seleccionar todo'), span:has-text('Select all')")
+                        if await select_all.count() > 0:
+                            await select_all.first.click()
+                            await page.wait_for_timeout(500)
+                            await select_all.first.click()
+                            await page.wait_for_timeout(500)
+                    except Exception:
+                        pass
+                try:
+                    option = slicer.locator(f"span:has-text('{option_text}')")
+                    if await option.count() > 0:
+                        await option.first.click()
+                        await page.wait_for_timeout(1000)
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return False
 
 # ── Búsqueda automática de opciones en los frames de Power BI ────────────────
 async def click_option_in_frames(page, option_text: str, wait_ms: int = 1000) -> bool:
@@ -333,20 +360,12 @@ async def extract_full_report() -> dict:
 
         # ── Aplicar filtro Mes = mes_actual (automático) ─────────────────────
         print(f"🗓️  Aplicando filtro Mes = {mes_actual}...")
-        await px(page, *MES_HEADER)           # abrir dropdown
-        await page.wait_for_timeout(800)
-        await deselect_all_in_frames(page)    # deseleccionar todo
-        await deselect_all_in_frames(page)    # doble click por si es toggle
-        await click_option_in_frames(page, mes_actual)  # seleccionar mes actual
-        await px(page, *MES_HEADER)           # cerrar dropdown
+        await click_filter_option(page, "Mes", mes_actual, deselect_all_first=True)
         await page.wait_for_timeout(2000)
 
         # ── Aplicar filtro Supervisor = YOHN (automático) ─────────────────────
         print("👤 Aplicando filtro Supervisor = YOHN...")
-        await px(page, *SUP_HEADER)
-        await page.wait_for_timeout(800)
-        await click_option_in_frames(page, "YOHN")
-        await px(page, *SUP_HEADER)
+        await click_filter_option(page, "Supervisor", "YOHN", deselect_all_first=True)
         await page.wait_for_timeout(2000)
         await page.screenshot(path="screenshot_filtros.png")
 
@@ -362,25 +381,38 @@ async def extract_full_report() -> dict:
             print(f"  → {tienda} | {visita}")
             try:
                 # 1. Seleccionar solo esta visita en el filtro de Nro. Visita
-                await px(page, *VIS_HEADER)
-                await page.wait_for_timeout(600)
-                await deselect_all_in_frames(page)
-                await click_option_in_frames(page, visita)
-                await px(page, *VIS_HEADER)
-                await page.wait_for_timeout(1500)  # esperar render
+                await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True)
+                await page.wait_for_timeout(2000)  # esperar render
 
-                # 2. Leer score DIRECTAMENTE de la fila de tabla
-                #    (no depende del donut ni de coordenadas)
-                score = await find_score_in_table(page, tienda, visita)
+                # 2. Leer score HACIENDO CLIC en Top Places / row de Tienda
+                score = "Sin visita"
+                tienda_label = page.locator(f"text={tienda}").last
+                if await tienda_label.is_visible(timeout=3000):
+                    await tienda_label.click()
+                    await page.wait_for_timeout(2500)
+                    
+                    page_txt = await page_text(page)
+                    m = re.search(r"(\d{1,3})\s*%\s*\n*.*Suce?ss\s+Rate", page_txt, re.IGNORECASE)
+                    if m:
+                        score = m.group(1) + "%"
+                    else:
+                        m2 = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", page_txt, re.IGNORECASE)
+                        if m2:
+                            score = m2.group(1) + "%"
+                        else:
+                            rg = re.search(r"Resumen General[^%]{0,150}?(\d{1,3})\s*%", page_txt, re.IGNORECASE)
+                            score = rg.group(1) + "%" if rg else "Sin visita"
 
-                result["tiendas"][tienda][visita] = score if score else "Sin visita"
+                    # 3. Clic neutro para deseleccionar
+                    await tienda_label.click()
+                    await page.wait_for_timeout(1000)
+
+                result["tiendas"][tienda][visita] = score
                 print(f"    🏁 {tienda} | {visita} → {result['tiendas'][tienda][visita]}")
-
-                # 3. Clic neutro para deseleccionar la fila y resetear estado
-                await px(page, *AREA_NEUTRAL, wait_ms=800)
 
             except Exception as e:
                 print(f"     ❌ Error: {e}")
+                result["tiendas"][tienda][visita] = "Error"
                 result["tiendas"][tienda][visita] = "Error"
 
         await ctx.close()

@@ -166,30 +166,28 @@ async def extract_full_report() -> dict:
                     await page.wait_for_timeout(1500)
 
                     # Filtrar por tienda haciendo clic en "Top Places"
+                    score = "Sin visita"
                     try:
                         tienda_label = page.locator(f"text={tienda}").last
                         if await tienda_label.is_visible(timeout=3000):
                             await tienda_label.click()
-                            await page.wait_for_timeout(2000)
+                            await page.wait_for_timeout(2500)
+                            text = await get_page_text(page)
+                            
+                            m = re.search(r"(\d{1,3})\s*%\s*\n*.*Suce?ss\s+Rate", text, re.IGNORECASE)
+                            if m:
+                                score = m.group(1) + "%"
+                            else:
+                                m2 = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", text, re.IGNORECASE)
+                                if m2:
+                                    score = m2.group(1) + "%"
+                                else:
+                                    rg = re.search(r"Resumen General[^%]{0,150}?(\d{1,3})\s*%", text, re.IGNORECASE)
+                                    score = rg.group(1) + "%" if rg else "Sin visita"
                     except Exception:
                         pass
 
-                    text = await get_page_text(page)
-
-                    # Buscar Success Rate
-                    score = None
-                    sr_match = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", text, re.IGNORECASE)
-                    if sr_match:
-                        score = sr_match.group(1) + "%"
-                    else:
-                        matches = re.findall(r"(\d{1,3})\s*%", text)
-                        non_100 = [m for m in matches if m != "100"]
-                        if non_100:
-                            score = non_100[0] + "%"
-                        elif matches:
-                            score = matches[0] + "%"
-
-                    result["tiendas"][tienda][visita] = score or "N/D"
+                    result["tiendas"][tienda][visita] = score
                 except Exception as e:
                     result["tiendas"][tienda][visita] = "Error"
                     print(f"Error {tienda} {visita}: {e}")
