@@ -64,39 +64,59 @@ async def page_text(page) -> str:
             pass
     return txt
 
-# ── Parsear el Success Rate del texto ─────────────────────────────────────────
+# ── Parsear score desde el texto de UNA FILA de tabla ────────────────────────
+def parse_score_from_row(row_text: str) -> str | None:
+    """
+    Intenta extraer el porcentaje desde el texto de una fila de la tabla.
+    La tabla suele tener: 'TIENDA  Visita N  85%' o similar.
+    """
+    matches = re.findall(r"(\d{1,3})\s*%", row_text)
+    valid = [int(x) for x in matches if 0 < int(x) <= 100]
+    if valid:
+        print(f"    📊 Score de fila: {valid[0]}%")
+        return str(valid[0]) + "%"
+    # A veces viene como número decimal: '85.3' → tomamos el entero
+    matches_dec = re.findall(r"(\d{1,3})[.,]\d+", row_text)
+    valid_dec = [int(x) for x in matches_dec if 0 < int(x) <= 100]
+    if valid_dec:
+        print(f"    📊 Score de fila (decimal): {valid_dec[0]}%")
+        return str(valid_dec[0]) + "%"
+    return None
+
+# ── Parsear el Success Rate del texto de PÁGINA COMPLETA ─────────────────────
 def parse_success_rate(text: str) -> str | None:
     """
-    En Power BI, el donut de 'Sucess Rate' tiene el LABEL primero en el DOM
-    y el VALOR porcentual aparece varias lineas despues.
-    Normalizamos el texto y buscamos el primer % despues del label.
+    Busca el porcentaje del donut 'Sucess Rate' en el texto de la página.
+    Solo se usa cuando no se pudo leer de la fila directamente.
     """
     normalized = " ".join(text.split())
 
-    # Estrategia 1: primer % despues del label 'Sucess Rate' (hasta 400 chars)
-    m = re.search(r"Suce?ss\s*Rat[^%]{0,400}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    # Estrategia 1: primer % despues del label 'Sucess Rate' (hasta 200 chars)
+    m = re.search(r"Suce?ss\s*Rat[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            print(f"    📊 Score (patrón 1): {val}%")
+            print(f"    📊 Score (patrón SR): {val}%")
             return str(val) + "%"
 
     # Estrategia 2: buscar en sección Resumen General
-    m = re.search(r"Resumen General[^%]{0,400}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    m = re.search(r"Resumen General[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            print(f"    📊 Score (patrón 2 Resumen): {val}%")
+            print(f"    📊 Score (patrón Resumen): {val}%")
             return str(val) + "%"
 
-    # Fallback: primer % razonable en el texto (excluye 100 y 0)
-    all_pct = re.findall(r"(\d{1,3})\s*%", normalized)
-    non_100 = [int(x) for x in all_pct if 0 < int(x) < 100]
-    if non_100:
-        print(f"    ⚠️ Fallback: {non_100[0]}% (encontrados: {all_pct[:8]})")
-        return str(non_100[0]) + "%"
+    # Estrategia 3: buscar el número inmediatamente antes o despues de "Nota"
+    m = re.search(r"Nota\D{0,30}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            print(f"    📊 Score (patrón Nota): {val}%")
+            return str(val) + "%"
 
     return None
+
 
 # ── Parsear RecordUpdate ───────────────────────────────────────────────────────
 def parse_record_update(text: str) -> str | None:
@@ -149,20 +169,46 @@ async def deselect_all_in_frames(page) -> bool:
             return True
     return False
 
-# ── Clic en fila de tabla por texto (no depende de coordenadas) ───────────────
-async def click_table_row(page, tienda: str, visita: str) -> bool:
+# ── Buscar score directamente en la tabla (sin cross-filter al donut) ────────
+async def find_score_in_table(page, tienda: str, visita: str) -> str | None:
     """
-    Busca la fila de la tabla que contiene 'tienda' y 'visita' y hace clic.
-    Estrategia escalonada:
-      1. Fila con tienda + visita (texto exacto)
-      2. Fila con solo tienda (si el slicer ya filtra la visita)
-      3. Elemento con texto de tienda en cualquier parte del DOM (Top Places / visual)
+    Recorre las filas de la tabla de Power BI buscando la que corresponde
+    a (tienda, visita) y extrae el score DIRECTAMENTE del texto de esa fila.
+
+    Estrategia:
+      1. Busca fila con tienda+visita → extrae % del texto de la propia fila
+      2. Si la fila no tiene %, la clica y lee el donut (Sucess Rate) filtrado
+      3. Si no hay fila tienda+visita, busca fila con solo tienda (slicer ya filtra)
+         y repite el proceso de leer/clicar
+      4. Sin fila → retorna None
     """
-    tienda_norm  = tienda.upper().strip()
-    visita_norm  = visita.upper().strip()
+    tienda_norm = tienda.upper().strip()
+    visita_norm = visita.upper().strip()
     row_selectors = ["tr", "div[role='row']", "[class*='row']", "[class*='tableRow']"]
 
-    # ── Intento 1: fila con tienda + visita ──────────────────────────────────
+    async def try_get_score_from_row(row, label: str) -> str | None:
+        """Intenta leer el % de la fila; si no tiene, hace clic y lee el donut."""
+        try:
+            row_text = await row.inner_text(timeout=1000)
+            print(f"    📋 Fila encontrada ({label}): {repr(row_text[:120])}")
+            # Prioridad 1: el % está en la fila misma
+            score = parse_score_from_row(row_text)
+            if score:
+                return score
+            # Prioridad 2: clicar la fila y leer el donut de la página
+            print(f"    🖱️ Fila sin %, haciendo clic para filtrar donut...")
+            await row.click()
+            await page.wait_for_timeout(2500)
+            page_txt = await page_text(page)
+            score = parse_success_rate(page_txt)
+            if score:
+                print(f"    📊 Score del donut tras clic: {score}")
+            return score
+        except Exception as e:
+            print(f"    ⚠️ Error procesando fila: {e}")
+            return None
+
+    # ── Intento 1: fila con tienda + visita ─────────────────────────────────
     for frame in page.frames:
         for sel in row_selectors:
             try:
@@ -171,72 +217,61 @@ async def click_table_row(page, tienda: str, visita: str) -> bool:
                 for i in range(count):
                     row = rows.nth(i)
                     try:
-                        row_text = await row.inner_text(timeout=1000)
-                        rt_norm  = row_text.upper().strip()
+                        row_text_peek = await row.inner_text(timeout=800)
+                        rt_norm = row_text_peek.upper().strip()
                         if tienda_norm in rt_norm and visita_norm in rt_norm:
-                            await row.click()
-                            await page.wait_for_timeout(2000)
-                            print(f"    ✅ [1] Fila tienda+visita clickeada: {tienda} / {visita}")
-                            return True
+                            score = await try_get_score_from_row(row, f"{tienda}/{visita}")
+                            if score:
+                                return score
                     except Exception:
                         continue
             except Exception:
                 continue
 
-    # ── Intento 2: fila con solo tienda (el slicer de visita ya está activo) ──
-    print(f"    ⚠️ No encontré fila '{tienda}+{visita}', intentando solo '{tienda}'...")
+    # ── LOG: mostrar primeras filas para diagnóstico ─────────────────────────
+    print(f"    ⚠️ Sin fila '{tienda}+{visita}'. Mostrando filas disponibles:")
     for frame in page.frames:
-        for sel in row_selectors:
+        for sel in ["tr", "div[role='row']"]:
             try:
                 rows = frame.locator(sel)
                 count = await rows.count()
-                # Log de primeras filas para diagnóstico
-                if count > 0 and sel == "tr":
-                    sample_texts = []
-                    for j in range(min(5, count)):
+                if count > 1:
+                    for j in range(min(8, count)):
                         try:
-                            t = await rows.nth(j).inner_text(timeout=800)
-                            sample_texts.append(repr(t[:80]))
+                            t = await rows.nth(j).inner_text(timeout=600)
+                            if t.strip():
+                                print(f"      [{j}] {repr(t.strip()[:100])}")
                         except Exception:
                             pass
-                    if sample_texts:
-                        print(f"    📋 Primeras filas ({frame.name or 'main'}/{sel}): {sample_texts}")
+                    break
+            except Exception:
+                continue
+        break
+
+    # ── Intento 2: fila con solo tienda (slicer de visita ya activo) ────────
+    print(f"    🔄 Buscando fila solo con '{tienda}'...")
+    for frame in page.frames:
+        for sel in row_selectors:
+            try:
+                rows = frame.locator(sel)
+                count = await rows.count()
                 for i in range(count):
                     row = rows.nth(i)
                     try:
-                        row_text = await row.inner_text(timeout=1000)
-                        rt_norm  = row_text.upper().strip()
-                        if tienda_norm in rt_norm:
-                            await row.click()
-                            await page.wait_for_timeout(2000)
-                            print(f"    ✅ [2] Fila (solo tienda) clickeada: {tienda}")
-                            return True
+                        row_text_peek = await row.inner_text(timeout=800)
+                        rt_norm = row_text_peek.upper().strip()
+                        # Excluir filas que sean encabezados (no tienen números)
+                        if tienda_norm in rt_norm and re.search(r'\d', rt_norm):
+                            score = await try_get_score_from_row(row, f"{tienda} (slicer)")
+                            if score:
+                                return score
                     except Exception:
                         continue
             except Exception:
                 continue
 
-    # ── Intento 3: clic en cualquier elemento con el texto de la tienda ──────
-    print(f"    ⚠️ No encontré fila solo '{tienda}', intentando clic por texto en DOM...")
-    for frame in page.frames:
-        for loc_expr in [
-            lambda f: f.get_by_text(tienda, exact=False),
-            lambda f: f.locator(f"[title*='{tienda}']"),
-            lambda f: f.locator(f"[aria-label*='{tienda}']"),
-        ]:
-            try:
-                loc   = loc_expr(frame)
-                count = await loc.count()
-                if count > 0:
-                    await loc.first.click()
-                    await page.wait_for_timeout(2000)
-                    print(f"    ✅ [3] Clic por texto/atributo: {tienda}")
-                    return True
-            except Exception:
-                pass
-
-    print(f"    ❌ Sin fila para: {tienda} / {visita}")
-    return False
+    print(f"    ❌ Sin score para: {tienda} / {visita}")
+    return None
 
 # ── Extracción principal (1 sola carga de página) ─────────────────────────────
 async def extract_full_report() -> dict:
@@ -326,35 +361,22 @@ async def extract_full_report() -> dict:
         for visita, tienda in combos:
             print(f"  → {tienda} | {visita}")
             try:
-                # 1. Seleccionar solo esta visita en el filtro
+                # 1. Seleccionar solo esta visita en el filtro de Nro. Visita
                 await px(page, *VIS_HEADER)
                 await page.wait_for_timeout(600)
                 await deselect_all_in_frames(page)
                 await click_option_in_frames(page, visita)
                 await px(page, *VIS_HEADER)
-                await page.wait_for_timeout(1000)
+                await page.wait_for_timeout(1500)  # esperar render
 
-                # 2. Clic en la fila de la tabla (por texto de tienda+visita)
-                #    NO usamos coordenadas del grafico Top Places porque
-                #    las barras cambian de posicion segun el ranking de notas.
-                found_row = await click_table_row(page, tienda, visita)
+                # 2. Leer score DIRECTAMENTE de la fila de tabla
+                #    (no depende del donut ni de coordenadas)
+                score = await find_score_in_table(page, tienda, visita)
 
-                # 3. Leer Success Rate
-                #    Si found_row es False, el slicer de visita ya está activo;
-                #    intentamos leer el score del estado actual del dashboard.
-                text  = await page_text(page)
-                excerpt = " ".join(text.split())[:600]
-                print(f"    📄 Texto (600c): {excerpt}")
-                score = parse_success_rate(text)
+                result["tiendas"][tienda][visita] = score if score else "Sin visita"
+                print(f"    🏁 {tienda} | {visita} → {result['tiendas'][tienda][visita]}")
 
-                if score:
-                    result["tiendas"][tienda][visita] = score
-                    if not found_row:
-                        print(f"    ℹ️ Score leído sin clic en fila ({tienda}/{visita}): {score}")
-                else:
-                    result["tiendas"][tienda][visita] = "Sin visita" if not found_row else "N/D"
-
-                # 4. Clic neutro para deseleccionar la fila
+                # 3. Clic neutro para deseleccionar la fila y resetear estado
                 await px(page, *AREA_NEUTRAL, wait_ms=800)
 
             except Exception as e:
