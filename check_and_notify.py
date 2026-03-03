@@ -119,16 +119,16 @@ def parse_success_rate(text: str) -> str | None:
 
 
 # ── Parsear RecordUpdate ───────────────────────────────────────────────────────
-def parse_record_update(text: str) -> str | None:
+def parse_record_update(text: str) -> tuple[str | None, str | None]:
     t = re.sub(r'RecordUpdat\s*e', 'RecordUpdate', text, flags=re.IGNORECASE)
     m = re.search(
-        r"RecordUpdate\s*([\d]{1,2}\s*-\s*[A-Za-z]{3}\s*[\d]{1,2}\s*:\s*[\d]{2})",
+        r"RecordUpdate\s*([\d]{1,2}\s*-\s*([A-Za-z]{3})\s*[\d]{1,2}\s*:\s*[\d]{2})",
         t, re.IGNORECASE
     )
     if m:
-        return m.group(1).strip()
-    m = re.search(r"([\d]{1,2}\s*-\s*[A-Za-z]{3}\s*[\d]{1,2}\s*:\s*[\d]{2})", t, re.IGNORECASE)
-    return m.group(1).strip() if m else None
+        return m.group(1).strip(), m.group(2).strip().capitalize()
+    m = re.search(r"([\d]{1,2}\s*-\s*([A-Za-z]{3})\s*[\d]{1,2}\s*:\s*[\d]{2})", t, re.IGNORECASE)
+    return (m.group(1).strip(), m.group(2).strip().capitalize()) if m else (None, None)
 
 # ── Búsqueda automática en visual-containers ─────────────────────────────────
 async def click_filter_option(page, filter_label: str, option_text: str, deselect_all_first: bool = False):
@@ -355,7 +355,11 @@ async def extract_full_report() -> dict:
         await page.screenshot(path="screenshot_inicio.png")
 
         # RecordUpdate desde estado inicial
-        result["record_update"] = parse_record_update(await page_text(page))
+        rd_upd, parsed_mes = parse_record_update(await page_text(page))
+        result["record_update"] = rd_upd
+        if parsed_mes:
+            mes_actual = parsed_mes
+            result["mes"] = mes_actual
         print(f"🔖 RecordUpdate: {result['record_update']}")
 
         # ── Aplicar filtro Mes = mes_actual (automático) ─────────────────────

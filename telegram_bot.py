@@ -134,9 +134,17 @@ async def extract_full_report() -> dict:
 
         # Extraer RecordUpdate
         text_norm = re.sub(r'RecordUpdat\s*e', 'RecordUpdate', text_inicial, flags=re.IGNORECASE)
-        m = re.search(r"RecordUpdate\s*([\d]{1,2}\s*-\s*[A-Za-z]{3}\s*[\d]{1,2}\s*:\s*[\d]{2})", text_norm, re.IGNORECASE)
+        m = re.search(r"RecordUpdate\s*([\d]{1,2}\s*-\s*([A-Za-z]{3})\s*[\d]{1,2}\s*:\s*[\d]{2})", text_norm, re.IGNORECASE)
         if m:
             result["record_update"] = m.group(1).strip()
+            mes_actual = m.group(2).strip().capitalize()
+            result["mes"] = mes_actual
+        else:
+            m = re.search(r"([\d]{1,2}\s*-\s*([A-Za-z]{3})\s*[\d]{1,2}\s*:\s*[\d]{2})", text_norm, re.IGNORECASE)
+            if m:
+                result["record_update"] = m.group(1).strip()
+                mes_actual = m.group(2).strip().capitalize()
+                result["mes"] = mes_actual
 
         visitas = ["Visita 1", "Visita 2"]
 
