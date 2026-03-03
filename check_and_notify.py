@@ -132,7 +132,7 @@ def parse_record_update(text: str) -> tuple[str | None, str | None]:
 
 # ── Búsqueda automática en visual-containers ─────────────────────────────────
 async def click_filter_option(page, filter_label: str, option_text: str, deselect_all_first: bool = False):
-    """Intenta abrir el slicer con filter_label y seleccionar option_text."""
+    """Intenta abrir el slicer con filter_label (clic en el centro o header) y busca option_text en toda la página."""
     slicers = page.locator("visual-container")
     count = await slicers.count()
     for i in range(count):
@@ -140,24 +140,30 @@ async def click_filter_option(page, filter_label: str, option_text: str, deselec
         try:
             slicer_text = await slicer.inner_text(timeout=3000)
             if filter_label.lower() in slicer_text.lower():
-                if deselect_all_first:
-                    try:
-                        select_all = slicer.locator("span:has-text('Seleccionar todo'), span:has-text('Select all')")
-                        if await select_all.count() > 0:
-                            await select_all.first.click()
-                            await page.wait_for_timeout(500)
-                            await select_all.first.click()
-                            await page.wait_for_timeout(500)
-                    except Exception:
-                        pass
+                # 1. Hacer clic para ABRIR el dropdown. PowerBI suele tener el hit target en el slicer
+                # Hacemos click en el borde superior o centro para abrirlo
                 try:
-                    option = slicer.locator(f"span:has-text('{option_text}')")
-                    if await option.count() > 0:
-                        await option.first.click()
-                        await page.wait_for_timeout(1000)
-                        return True
+                    await slicer.click(position={"x": 10, "y": 10})
                 except Exception:
-                    continue
+                    await slicer.click()
+                await page.wait_for_timeout(1000)
+
+                # 2. Deseleccionar todo si es necesario (el menú ya está abierto)
+                if deselect_all_first:
+                    await deselect_all_in_frames(page)
+                    await page.wait_for_timeout(800)
+
+                # 3. Seleccionar la opción en toda la página/frames
+                clicked = await click_option_in_frames(page, option_text)
+                
+                # 4. Cerrar el dropdown (repitiendo el clic en el slicer)
+                try:
+                    await slicer.click(position={"x": 10, "y": 10})
+                except Exception:
+                    await slicer.click()
+                await page.wait_for_timeout(1000)
+                
+                return clicked
         except Exception:
             continue
     return False

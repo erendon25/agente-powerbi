@@ -52,8 +52,34 @@ async def get_page_text(page) -> str:
             pass
     return text_content
 
+async def click_option_in_frames(page, option_text: str, wait_ms: int = 1000) -> bool:
+    for frame in page.frames:
+        for loc_expr in [
+            lambda f: f.get_by_text(option_text, exact=False),
+            lambda f: f.locator(f"span:text-is('{option_text}')"),
+            lambda f: f.locator(f"div:text-is('{option_text}')"),
+            lambda f: f.locator(f"[title='{option_text}']"),
+            lambda f: f.locator(f"[aria-label*='{option_text}']"),
+        ]:
+            try:
+                loc = loc_expr(frame)
+                cnt = await loc.count()
+                if cnt > 0:
+                    await loc.first.click()
+                    await page.wait_for_timeout(wait_ms)
+                    return True
+            except Exception:
+                pass
+    return False
+
+async def deselect_all_in_frames(page) -> bool:
+    for text in ["Seleccionar todo", "Select all"]:
+        if await click_option_in_frames(page, text, wait_ms=600):
+            return True
+    return False
+
 async def click_filter_option(page, filter_label: str, option_text: str, deselect_all_first: bool = False):
-    """Intenta abrir el slicer con filter_label y seleccionar option_text."""
+    """Intenta abrir el slicer con filter_label (clic en el centro o header) y busca option_text en toda la página."""
     slicers = page.locator("visual-container")
     count = await slicers.count()
     for i in range(count):
@@ -61,24 +87,25 @@ async def click_filter_option(page, filter_label: str, option_text: str, deselec
         try:
             slicer_text = await slicer.inner_text(timeout=3000)
             if filter_label.lower() in slicer_text.lower():
-                if deselect_all_first:
-                    try:
-                        select_all = slicer.locator("span:has-text('Seleccionar todo'), span:has-text('Select all')")
-                        if await select_all.count() > 0:
-                            await select_all.first.click()
-                            await page.wait_for_timeout(500)
-                            await select_all.first.click()
-                            await page.wait_for_timeout(500)
-                    except Exception:
-                        pass
                 try:
-                    option = slicer.locator(f"span:has-text('{option_text}')")
-                    if await option.count() > 0:
-                        await option.first.click()
-                        await page.wait_for_timeout(1000)
-                        return True
+                    await slicer.click(position={"x": 10, "y": 10})
                 except Exception:
-                    continue
+                    await slicer.click()
+                await page.wait_for_timeout(1000)
+
+                if deselect_all_first:
+                    await deselect_all_in_frames(page)
+                    await page.wait_for_timeout(800)
+
+                clicked = await click_option_in_frames(page, option_text)
+                
+                try:
+                    await slicer.click(position={"x": 10, "y": 10})
+                except Exception:
+                    await slicer.click()
+                await page.wait_for_timeout(1000)
+                
+                return clicked
         except Exception:
             continue
     return False
