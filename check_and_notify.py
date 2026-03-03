@@ -153,9 +153,16 @@ async def deselect_all_in_frames(page) -> bool:
 async def click_table_row(page, tienda: str, visita: str) -> bool:
     """
     Busca la fila de la tabla que contiene 'tienda' y 'visita' y hace clic.
-    Robusto: no depende de la posicion de las barras en Top Places.
+    Estrategia escalonada:
+      1. Fila con tienda + visita (texto exacto)
+      2. Fila con solo tienda (si el slicer ya filtra la visita)
+      3. Elemento con texto de tienda en cualquier parte del DOM (Top Places / visual)
     """
+    tienda_norm  = tienda.upper().strip()
+    visita_norm  = visita.upper().strip()
     row_selectors = ["tr", "div[role='row']", "[class*='row']", "[class*='tableRow']"]
+
+    # ── Intento 1: fila con tienda + visita ──────────────────────────────────
     for frame in page.frames:
         for sel in row_selectors:
             try:
@@ -165,16 +172,70 @@ async def click_table_row(page, tienda: str, visita: str) -> bool:
                     row = rows.nth(i)
                     try:
                         row_text = await row.inner_text(timeout=1000)
-                        if tienda in row_text and visita in row_text:
+                        rt_norm  = row_text.upper().strip()
+                        if tienda_norm in rt_norm and visita_norm in rt_norm:
                             await row.click()
                             await page.wait_for_timeout(2000)
-                            print(f"    ✅ Fila encontrada y clickeada: {tienda} / {visita}")
+                            print(f"    ✅ [1] Fila tienda+visita clickeada: {tienda} / {visita}")
                             return True
                     except Exception:
                         continue
             except Exception:
                 continue
-    print(f"    ⚠️ Sin fila para: {tienda} / {visita} (visita no registrada)")
+
+    # ── Intento 2: fila con solo tienda (el slicer de visita ya está activo) ──
+    print(f"    ⚠️ No encontré fila '{tienda}+{visita}', intentando solo '{tienda}'...")
+    for frame in page.frames:
+        for sel in row_selectors:
+            try:
+                rows = frame.locator(sel)
+                count = await rows.count()
+                # Log de primeras filas para diagnóstico
+                if count > 0 and sel == "tr":
+                    sample_texts = []
+                    for j in range(min(5, count)):
+                        try:
+                            t = await rows.nth(j).inner_text(timeout=800)
+                            sample_texts.append(repr(t[:80]))
+                        except Exception:
+                            pass
+                    if sample_texts:
+                        print(f"    📋 Primeras filas ({frame.name or 'main'}/{sel}): {sample_texts}")
+                for i in range(count):
+                    row = rows.nth(i)
+                    try:
+                        row_text = await row.inner_text(timeout=1000)
+                        rt_norm  = row_text.upper().strip()
+                        if tienda_norm in rt_norm:
+                            await row.click()
+                            await page.wait_for_timeout(2000)
+                            print(f"    ✅ [2] Fila (solo tienda) clickeada: {tienda}")
+                            return True
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+
+    # ── Intento 3: clic en cualquier elemento con el texto de la tienda ──────
+    print(f"    ⚠️ No encontré fila solo '{tienda}', intentando clic por texto en DOM...")
+    for frame in page.frames:
+        for loc_expr in [
+            lambda f: f.get_by_text(tienda, exact=False),
+            lambda f: f.locator(f"[title*='{tienda}']"),
+            lambda f: f.locator(f"[aria-label*='{tienda}']"),
+        ]:
+            try:
+                loc   = loc_expr(frame)
+                count = await loc.count()
+                if count > 0:
+                    await loc.first.click()
+                    await page.wait_for_timeout(2000)
+                    print(f"    ✅ [3] Clic por texto/atributo: {tienda}")
+                    return True
+            except Exception:
+                pass
+
+    print(f"    ❌ Sin fila para: {tienda} / {visita}")
     return False
 
 # ── Extracción principal (1 sola carga de página) ─────────────────────────────
@@ -278,18 +339,20 @@ async def extract_full_report() -> dict:
                 #    las barras cambian de posicion segun el ranking de notas.
                 found_row = await click_table_row(page, tienda, visita)
 
-                if not found_row:
-                    # Si no hay fila para esta combinacion, no hay visita registrada
-                    result["tiendas"][tienda][visita] = "Sin visita"
-                    await px(page, *AREA_NEUTRAL, wait_ms=500)
-                    continue
-
                 # 3. Leer Success Rate
-                text = await page_text(page)
+                #    Si found_row es False, el slicer de visita ya está activo;
+                #    intentamos leer el score del estado actual del dashboard.
+                text  = await page_text(page)
                 excerpt = " ".join(text.split())[:600]
                 print(f"    📄 Texto (600c): {excerpt}")
                 score = parse_success_rate(text)
-                result["tiendas"][tienda][visita] = score or "N/D"
+
+                if score:
+                    result["tiendas"][tienda][visita] = score
+                    if not found_row:
+                        print(f"    ℹ️ Score leído sin clic en fila ({tienda}/{visita}): {score}")
+                else:
+                    result["tiendas"][tienda][visita] = "Sin visita" if not found_row else "N/D"
 
                 # 4. Clic neutro para deseleccionar la fila
                 await px(page, *AREA_NEUTRAL, wait_ms=800)
