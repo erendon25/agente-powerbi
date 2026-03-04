@@ -199,71 +199,60 @@ async def extract_full_report() -> dict:
 
         visitas = ["Visita 1", "Visita 2"]
 
-        for tienda in TIENDAS:
-            for visita in visitas:
+        # Filtros globales (Mes, Supervisor) se aplican una sola vez
+        print("Aplicando filtros globales...")
+        await click_filter_option(page, "Mes", mes_actual, deselect_all_first=True)
+        await page.wait_for_timeout(1000)
+        
+        await click_filter_option(page, "Supervisor", "YOHN", deselect_all_first=True)
+        await page.wait_for_timeout(1000)
+
+        for visita in visitas:
+            print(f"Filtrando {visita}...")
+            await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True)
+            await page.wait_for_timeout(1500)
+            
+            for tienda in TIENDAS:
+                score = "Sin visita"
                 try:
-                    try:
-                        await page.goto(URL, wait_until="networkidle", timeout=90000)
-                    except Exception:
-                        await page.goto(URL, wait_until="domcontentloaded", timeout=90000)
-                    await page.wait_for_timeout(10000)
-
-                    for sel in consent_selectors:
-                        try:
-                            btn = page.locator(sel).first
-                            if await btn.is_visible(timeout=1000):
-                                await btn.click()
-                                await page.wait_for_timeout(500)
-                        except Exception:
-                            pass
-
-                    await click_filter_option(page, "Mes", mes_actual, deselect_all_first=True)
-                    await page.wait_for_timeout(1500)
-                    await click_filter_option(page, "Supervisor", "YOHN", deselect_all_first=True)
-                    await page.wait_for_timeout(1500)
-                    await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True)
-                    await page.wait_for_timeout(1500)
-
-                    # Filtrar por tienda haciendo clic en cualquier texto visible que coincida
-                    score = "Sin visita"
-                    try:
-                        clicked = False
-                        for frame in page.frames:
-                            tienda_labels = frame.locator(f"text='{tienda}'")
-                            count = await tienda_labels.count()
-                            for i in range(count):
-                                lbl = tienda_labels.nth(i)
-                                if await lbl.is_visible():
-                                    try:
-                                        await lbl.scroll_into_view_if_needed()
-                                        await lbl.click(force=True)
-                                        clicked = True
-                                        await page.wait_for_timeout(2500)
-                                        text = await get_page_text(page)
-                                        
-                                        m = re.search(r"(\d{1,3})\s*%\s*\n*.*Suce?ss\s+Rate", text, re.IGNORECASE)
-                                        if m:
-                                            score = m.group(1) + "%"
+                    clicked = False
+                    for frame in page.frames:
+                        tienda_labels = frame.locator(f"text='{tienda}'")
+                        count = await tienda_labels.count()
+                        for i in range(count):
+                            lbl = tienda_labels.nth(i)
+                            if await lbl.is_visible():
+                                try:
+                                    await lbl.scroll_into_view_if_needed()
+                                    await lbl.click(force=True)
+                                    clicked = True
+                                    await page.wait_for_timeout(2000)
+                                    text = await get_page_text(page)
+                                    
+                                    m_score = re.search(r"(\d{1,3})\s*%\s*\n*.*Suce?ss\s+Rate", text, re.IGNORECASE)
+                                    if m_score:
+                                        score = m_score.group(1) + "%"
+                                    else:
+                                        m_score2 = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", text, re.IGNORECASE)
+                                        if m_score2:
+                                            score = m_score2.group(1) + "%"
                                         else:
-                                            m2 = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", text, re.IGNORECASE)
-                                            if m2:
-                                                score = m2.group(1) + "%"
-                                            else:
-                                                rg = re.search(r"Resumen General[^%]{0,150}?(\d{1,3})\s*%", text, re.IGNORECASE)
-                                                score = rg.group(1) + "%" if rg else "Sin visita"
-                                        
-                                        break
-                                    except Exception:
-                                        pass
-                            if clicked:
-                                break
-                    except Exception:
-                        pass
-
-                    result["tiendas"][tienda][visita] = score
-                except Exception as e:
-                    result["tiendas"][tienda][visita] = "Error"
-                    print(f"Error {tienda} {visita}: {e}")
+                                            rg = re.search(r"Resumen General[^%]{0,150}?(\d{1,3})\s*%", text, re.IGNORECASE)
+                                            score = rg.group(1) + "%" if rg else "Sin visita"
+                                    
+                                    # Deseleccionar la tienda actual
+                                    await lbl.click(force=True)
+                                    await page.wait_for_timeout(500)
+                                    break
+                                except Exception:
+                                    pass
+                        if clicked:
+                            break
+                except Exception:
+                    pass
+                
+                print(f" -> {tienda}: {score}")
+                result["tiendas"][tienda][visita] = score
 
         await context.close()
         await browser.close()

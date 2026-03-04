@@ -394,63 +394,57 @@ async def extract_full_report() -> dict:
         await page.screenshot(path="screenshot_filtros.png")
 
         # ── Extraer scores por tienda × visita ───────────────────────────────
-        combos = [
-            ("Visita 1", "PORONGOCHE"),
-            ("Visita 2", "PORONGOCHE"),
-            ("Visita 1", "MALL PORONGOCHE"),
-            ("Visita 2", "MALL PORONGOCHE"),
-        ]
+        for visita in ["Visita 1", "Visita 2"]:
+            print(f"🔄 Filtrando {visita}...")
+            # 1. Seleccionar solo esta visita en el filtro de Nro. Visita
+            await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True)
+            await page.wait_for_timeout(2000)  # esperar render
 
-        for visita, tienda in combos:
-            print(f"  → {tienda} | {visita}")
-            try:
-                # 1. Seleccionar solo esta visita en el filtro de Nro. Visita
-                await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True)
-                await page.wait_for_timeout(2000)  # esperar render
-
-                # 2. Leer score HACIENDO CLIC en cualquier texto visible de la Tienda
-                score = "Sin visita"
-                clicked = False
-                for frame in page.frames:
-                    tienda_labels = frame.locator(f"text='{tienda}'")
-                    count = await tienda_labels.count()
-                    for i in range(count):
-                        lbl = tienda_labels.nth(i)
-                        if await lbl.is_visible():
-                            try:
-                                await lbl.scroll_into_view_if_needed()
-                                await lbl.click(force=True)
-                                clicked = True
-                                await page.wait_for_timeout(2500)
-                                
-                                page_txt = await page_text(page)
-                                m = re.search(r"(\d{1,3})\s*%\s*\n*.*Suce?ss\s+Rate", page_txt, re.IGNORECASE)
-                                if m:
-                                    score = m.group(1) + "%"
-                                else:
-                                    m2 = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", page_txt, re.IGNORECASE)
-                                    if m2:
-                                        score = m2.group(1) + "%"
+            for tienda in ["PORONGOCHE", "MALL PORONGOCHE"]:
+                print(f"  → {tienda} | {visita}")
+                try:
+                    # 2. Leer score HACIENDO CLIC en cualquier texto visible de la Tienda
+                    score = "Sin visita"
+                    clicked = False
+                    for frame in page.frames:
+                        tienda_labels = frame.locator(f"text='{tienda}'")
+                        count = await tienda_labels.count()
+                        for i in range(count):
+                            lbl = tienda_labels.nth(i)
+                            if await lbl.is_visible():
+                                try:
+                                    await lbl.scroll_into_view_if_needed()
+                                    await lbl.click(force=True)
+                                    clicked = True
+                                    await page.wait_for_timeout(2500)
+                                    
+                                    page_txt = await page_text(page)
+                                    m = re.search(r"(\d{1,3})\s*%\s*\n*.*Suce?ss\s+Rate", page_txt, re.IGNORECASE)
+                                    if m:
+                                        score = m.group(1) + "%"
                                     else:
-                                        rg = re.search(r"Resumen General[^%]{0,150}?(\d{1,3})\s*%", page_txt, re.IGNORECASE)
-                                        score = rg.group(1) + "%" if rg else "Sin visita"
-                                
-                                # 3. Clic neutro para deseleccionar
-                                await lbl.click(force=True)
-                                await page.wait_for_timeout(1000)
-                                break
-                            except:
-                                pass
-                    if clicked:
-                        break
+                                        m2 = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", page_txt, re.IGNORECASE)
+                                        if m2:
+                                            score = m2.group(1) + "%"
+                                        else:
+                                            rg = re.search(r"Resumen General[^%]{0,150}?(\d{1,3})\s*%", page_txt, re.IGNORECASE)
+                                            score = rg.group(1) + "%" if rg else "Sin visita"
+                                    
+                                    # 3. Clic neutro para deseleccionar
+                                    await lbl.click(force=True)
+                                    await page.wait_for_timeout(1000)
+                                    break
+                                except:
+                                    pass
+                        if clicked:
+                            break
 
-                result["tiendas"][tienda][visita] = score
-                print(f"    🏁 {tienda} | {visita} → {result['tiendas'][tienda][visita]}")
+                    result["tiendas"][tienda][visita] = score
+                    print(f"    🏁 {tienda} | {visita} → {result['tiendas'][tienda][visita]}")
 
-            except Exception as e:
-                print(f"     ❌ Error: {e}")
-                result["tiendas"][tienda][visita] = "Error"
-                result["tiendas"][tienda][visita] = "Error"
+                except Exception as e:
+                    print(f"     ❌ Error: {e}")
+                    result["tiendas"][tienda][visita] = "Error"
 
         await ctx.close()
         await browser.close()
