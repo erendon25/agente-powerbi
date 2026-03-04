@@ -224,25 +224,39 @@ async def extract_full_report() -> dict:
                     await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True)
                     await page.wait_for_timeout(1500)
 
-                    # Filtrar por tienda haciendo clic en "Top Places"
+                    # Filtrar por tienda haciendo clic en cualquier texto visible que coincida
                     score = "Sin visita"
                     try:
-                        tienda_label = page.locator(f"text={tienda}").last
-                        if await tienda_label.is_visible(timeout=3000):
-                            await tienda_label.click()
-                            await page.wait_for_timeout(2500)
-                            text = await get_page_text(page)
-                            
-                            m = re.search(r"(\d{1,3})\s*%\s*\n*.*Suce?ss\s+Rate", text, re.IGNORECASE)
-                            if m:
-                                score = m.group(1) + "%"
-                            else:
-                                m2 = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", text, re.IGNORECASE)
-                                if m2:
-                                    score = m2.group(1) + "%"
-                                else:
-                                    rg = re.search(r"Resumen General[^%]{0,150}?(\d{1,3})\s*%", text, re.IGNORECASE)
-                                    score = rg.group(1) + "%" if rg else "Sin visita"
+                        clicked = False
+                        for frame in page.frames:
+                            tienda_labels = frame.locator(f"text='{tienda}'")
+                            count = await tienda_labels.count()
+                            for i in range(count):
+                                lbl = tienda_labels.nth(i)
+                                if await lbl.is_visible():
+                                    try:
+                                        await lbl.scroll_into_view_if_needed()
+                                        await lbl.click(force=True)
+                                        clicked = True
+                                        await page.wait_for_timeout(2500)
+                                        text = await get_page_text(page)
+                                        
+                                        m = re.search(r"(\d{1,3})\s*%\s*\n*.*Suce?ss\s+Rate", text, re.IGNORECASE)
+                                        if m:
+                                            score = m.group(1) + "%"
+                                        else:
+                                            m2 = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", text, re.IGNORECASE)
+                                            if m2:
+                                                score = m2.group(1) + "%"
+                                            else:
+                                                rg = re.search(r"Resumen General[^%]{0,150}?(\d{1,3})\s*%", text, re.IGNORECASE)
+                                                score = rg.group(1) + "%" if rg else "Sin visita"
+                                        
+                                        break
+                                    except Exception:
+                                        pass
+                            if clicked:
+                                break
                     except Exception:
                         pass
 
@@ -257,11 +271,15 @@ async def extract_full_report() -> dict:
     return result
 
 def format_report_message(report: dict) -> str:
+    from datetime import datetime
+    year = datetime.now().year
+
     mes = report.get("mes", "?")
     record = report.get("record_update", "?")
     tiendas = report.get("tiendas", {})
-    lineas = [
-        f"📊 *Reporte Mystery Client — {mes} 2026*",
+
+    lineas  = [
+        f"✅ *Consulta Manual — {mes} {year}*",
         f"🕐 RecordUpdate: `{record}`",
         "",
     ]

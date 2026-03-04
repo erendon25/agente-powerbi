@@ -1,0 +1,181 @@
+Show keyboard shortcuts
+Show screen reader tips
+Skip to main content
+Power BI Report
+Resultados por Segmentos
+Resumen General
+Scroll up
+Scroll down
+Scroll left
+Scroll right
+SEGMENTO
+ 
+Resultado
+Evaluación
+Best Place
+Growth
+EXPERIENCIA DE SERVICIO
+83 %
+data bar 83%
+PORONGOCHE
+0.4
+RAPIDEZ DE SERVICIO
+78 %
+data bar 78%
+AREQUIPA
+0.3
+CALIDAD DEL PRODUCTO
+69 %
+data bar 69%
+AREQUIPA
+0.2
+FRESCURA DEL PRODUCTO
+64 %
+data bar 64%
+PORONGOCHE
+0.0
+APARIENCIA DEL EMPLEADO
+75 %
+data bar 75%
+MALL PORONGOCHE
+0.0
+AMBIENTE DE LA TIENDA
+100 %
+data bar 100%
+AREQUIPA
+0.0
+Auditorias
+Items con nota
+Sucess Rate
+Tiendas
+R e c o r d U p d a t e
+27 - FEB    17 : 58
+Feb
+2026
+78 %
+Resultado
+Meta
+Time Line General
+C o n t r o l l e r s
+Scroll up
+Scroll down
+Scroll left
+Scroll right
+CRITERIO
+Resultado
+Growth
+ 
+¿El empleado se despidió correctamente? (Debe cerrar con un agradecimiento libre, pero mencionando la marca Little Caesars. Ejemplo: Gracias por venir a Little Caesars.)
+100 %
+1.00
+¿El empleado tiene un buen tono de voz e hizo contacto directo con usted?
+100 %
+1.00
+¿Su pizza estaba cortada en 8 rebanadas uniformes y del mismo tamaño?
+50 %
+1.00
+¿Cuánto tiempo tardó desde que tomaron su orden hasta que le entregaron su producto? (Menos de 1:00 minuto / Más de 1:00 minuto)
+75 %
+0.50
+¿El personal en caja ofreció el LTO?
+75 %
+0.50
+¿Los ingredientes estaban bien distribuidos en su pizza?
+75 %
+0.50
+Cuando tomaron su orden, ¿el producto estaba listo?
+75 %
+0.50
+¿El empleado realizó la venta sugestiva de productos adicionales a su orden?
+63 %
+0.25
+¿El empleado le dio atención directa a usted mientras tomaba su orden?
+100 %
+0.00
+¿El empleado llevaba un polo, gafete y gorra de Little Caesar’s y sus implementos estaban limpios?
+50 %
+0.00
+¿El empleado lo saludó correctamente y dentro de los 5 segundos protocolares? (Buenos días/tardes/noches, bienvenido a Little Caesar`s ¿Cúales su pedido Hot - n - ready el día de hoy?
+100 %
+0.00
+¿El empleado marcó correctamente su orden y le entregó su comprobante?
+100 %
+0.00
+¿La caja se encontraba correctamente marcada, según el tipo de producto solicitado?
+100 %
+0.00
+¿La pizza estaba libre de burbujas grandes? (Burbujas iguales o más grandes de 1 cm en diámetro)
+75 %
+0.00
+¿Los Crazy puffs estaba dentro de los requerimientos de expiración?
+50 %
+0.00
+El área del mostrador estaba organizada, limpia y libre de basura?
+100 %
+0.00
+El exterior de la tienda y el letrero de abierto se encontraban correctamente iluminados?
+100 %
+0.00
+Las mesas y pisos de la tienda se encontraban organizados, limpios y sin rastros de residuos?
+100 %
+0.00
+Los pisos y baños se encontraban limpios y abastecidos con jabón y papel?
+100 %
+0.00
+Si aplica, ¿el empleado que cobró manejó comida sin desinfectarse las manos con alcohol primero?
+100 %
+0.00
+Mes
+Feb
+Supervisor
+YOHN
+Nro. Visita
+Visita 1
+Scroll up
+Scroll down
+Scroll left
+Scroll right
+Row Selection
+Fecha
+ 
+Visita
+Tienda
+Evidencia
+Select Row
+06/02
+Visita 1
+AREQUIPA
+Select Row
+06/02
+Visita 1
+PORONGOCHE
+Select Row
+06/02
+Visita 1
+SAN GERONIMO
+Select Row
+20/02
+Visita 1
+MALL PORONGOCHE
+Top Places
+Criterio
+All
+PORONGOCHE
+SAN GERONIMO
+AREQUIPA
+MALL PORONGOCHE
+97 %
+77 %
+79 %
+57 %
+Venta sugestiva
+-
++
+142%
+Microsoft Power BI
+Report Zoomed To 142%
+
+4
+78%
+24
+4

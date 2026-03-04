@@ -408,28 +408,41 @@ async def extract_full_report() -> dict:
                 await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True)
                 await page.wait_for_timeout(2000)  # esperar render
 
-                # 2. Leer score HACIENDO CLIC en Top Places / row de Tienda
+                # 2. Leer score HACIENDO CLIC en cualquier texto visible de la Tienda
                 score = "Sin visita"
-                tienda_label = page.locator(f"text={tienda}").last
-                if await tienda_label.is_visible(timeout=3000):
-                    await tienda_label.click()
-                    await page.wait_for_timeout(2500)
-                    
-                    page_txt = await page_text(page)
-                    m = re.search(r"(\d{1,3})\s*%\s*\n*.*Suce?ss\s+Rate", page_txt, re.IGNORECASE)
-                    if m:
-                        score = m.group(1) + "%"
-                    else:
-                        m2 = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", page_txt, re.IGNORECASE)
-                        if m2:
-                            score = m2.group(1) + "%"
-                        else:
-                            rg = re.search(r"Resumen General[^%]{0,150}?(\d{1,3})\s*%", page_txt, re.IGNORECASE)
-                            score = rg.group(1) + "%" if rg else "Sin visita"
-
-                    # 3. Clic neutro para deseleccionar
-                    await tienda_label.click()
-                    await page.wait_for_timeout(1000)
+                clicked = False
+                for frame in page.frames:
+                    tienda_labels = frame.locator(f"text='{tienda}'")
+                    count = await tienda_labels.count()
+                    for i in range(count):
+                        lbl = tienda_labels.nth(i)
+                        if await lbl.is_visible():
+                            try:
+                                await lbl.scroll_into_view_if_needed()
+                                await lbl.click(force=True)
+                                clicked = True
+                                await page.wait_for_timeout(2500)
+                                
+                                page_txt = await page_text(page)
+                                m = re.search(r"(\d{1,3})\s*%\s*\n*.*Suce?ss\s+Rate", page_txt, re.IGNORECASE)
+                                if m:
+                                    score = m.group(1) + "%"
+                                else:
+                                    m2 = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", page_txt, re.IGNORECASE)
+                                    if m2:
+                                        score = m2.group(1) + "%"
+                                    else:
+                                        rg = re.search(r"Resumen General[^%]{0,150}?(\d{1,3})\s*%", page_txt, re.IGNORECASE)
+                                        score = rg.group(1) + "%" if rg else "Sin visita"
+                                
+                                # 3. Clic neutro para deseleccionar
+                                await lbl.click(force=True)
+                                await page.wait_for_timeout(1000)
+                                break
+                            except:
+                                pass
+                    if clicked:
+                        break
 
                 result["tiendas"][tienda][visita] = score
                 print(f"    🏁 {tienda} | {visita} → {result['tiendas'][tienda][visita]}")
@@ -448,10 +461,16 @@ async def extract_full_report() -> dict:
 def format_message(report: dict, es_primero: bool = False, last: str = "") -> str:
     mes    = report.get("mes", "?")
     record = report.get("record_update", "?")
+    
+    # Extract year from record or use current year temporarily
+    # "27 - FEB    17 : 58" -> year not in record, fallback
+    from datetime import datetime
+    year = datetime.now().year
+
     titulo = "🆕 *Primer registro*" if es_primero else "🔴 *¡Puntaje actualizado!*"
     lines  = [
         f"{titulo}",
-        f"📊 *Reporte Mystery Client — {mes} 2026*",
+        f"📊 *Reporte Mystery Client — {mes} {year}*",
         f"🕐 RecordUpdate: `{record}`",
     ]
     if last and not es_primero:
