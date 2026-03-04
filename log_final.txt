@@ -1,0 +1,291 @@
+Permite mostrar los métodos abreviados de teclado.
+Mostrar consejos para el lector de pantalla
+Pasar al contenido principal
+Informe de Power BI
+Resultados por Segmentos
+Resumen General
+Desplazarse hacia arriba
+Desplazarse hacia abajo
+Desplazar a la izquierda
+Desplazar a la derecha
+SEGMENTO
+ 
+Resultado
+Evaluación
+Best Place
+Growth
+EXPERIENCIA DE SERVICIO
+66 %
+barra de datos 69%
+AV PERU
+0.0
+RAPIDEZ DE SERVICIO
+79 %
+barra de datos 84%
+AREQUIPA
+0.0
+CALIDAD DEL PRODUCTO
+69 %
+barra de datos 73%
+AYACUCHO
+0.0
+FRESCURA DEL PRODUCTO
+79 %
+barra de datos 83%
+AV PERU
+0.0
+APARIENCIA DEL EMPLEADO
+82 %
+barra de datos 87%
+PORONGOCHE
+0.0
+AMBIENTE DE LA TIENDA
+95 %
+barra de datos 100%
+AREQUIPA
+0.0
+Auditorias
+Items con nota
+Sucess Rate
+Tiendas
+R e c o r d U p d a t e
+27 - FEB    17 : 58
+Ago
+Set
+Oct
+Nov
+Dic
+Ene
+Feb
+2025
+2026
+75 %
+72 %
+79 %
+75 %
+75 %
+76 %
+77 %
+Resultado
+Meta
+Time Line General
+C o n t r o l l e r s
+Desplazarse hacia arriba
+Desplazarse hacia abajo
+Desplazar a la izquierda
+Desplazar a la derecha
+CRITERIO
+Resultado
+Growth
+ 
+¿Los ingredientes estaban bien distribuidos en su pizza?
+55 %
+0.04
+¿Su pizza estaba cortada en 8 rebanadas uniformes y del mismo tamaño?
+59 %
+0.02
+¿El personal en caja ofreció el LTO?
+57 %
+0.01
+¿La pizza estaba libre de burbujas grandes? (Burbujas iguales o más grandes de 1 cm en diámetro)
+81 %
+0.01
+¿El empleado lo saludó correctamente y dentro de los 5 segundos protocolares? (Buenos días/tardes/noches, bienvenido a Little Caesar`s ¿Cúales su pedido Hot - n - ready el día de hoy?
+53 %
+0.00
+¿El empleado tiene un buen tono de voz e hizo contacto directo con usted?
+94 %
+0.00
+¿La caja se encontraba correctamente marcada, según el tipo de producto solicitado?
+81 %
+0.00
+Los pisos y baños se encontraban limpios y abastecidos con jabón y papel?
+95 %
+0.00
+El exterior de la tienda y el letrero de abierto se encontraban correctamente iluminados?
+100 %
+0.00
+Uñas no pintadas, no largas, no sucias, no despeinado, no barba, aretes pequeños, no pulseras, no relojes
+100 %
+0.00
+¿El empleado le dio atención directa a usted mientras tomaba su orden?
+97 %
+0.00
+¿El empleado llevaba un polo, gafete y gorra de Little Caesar’s y sus implementos estaban limpios?
+64 %
+0.00
+El área del mostrador estaba organizada, limpia y libre de basura?
+99 %
+0.00
+Si contestó que SI, ¿estaban todas las cajas abiertas?
+90 %
+0.00
+Las mesas y pisos de la tienda se encontraban organizados, limpios y sin rastros de residuos?
+83 %
+-0.01
+¿El empleado se despidió correctamente? (Debe cerrar con un agradecimiento libre, pero mencionando la marca Little Caesars. Ejemplo: Gracias por venir a Little Caesars.)
+64 %
+-0.01
+¿El empleado realizó la venta sugestiva de productos adicionales a su orden?
+52 %
+-0.01
+¿El empleado marcó correctamente su orden y le entregó su comprobante?
+97 %
+-0.01
+¿Cuánto tiempo tardó desde que tomaron su orden hasta que le entregaron su producto? (Menos de 1:00 minuto / Más de 1:00 minuto)
+76 %
+-0.02
+Cuando tomaron su orden, ¿el producto estaba listo?
+76 %
+-0.02
+Mes
+Todas
+Supervisor
+Todas
+Nro. Visita
+Todas
+Desplazarse hacia arriba
+Desplazarse hacia abajo
+Desplazar a la izquierda
+Desplazar a la derecha
+Selección de fila
+Fecha
+ 
+Visita
+Tienda
+Evidencia
+Seleccionar fila
+05/12
+Visita 1
+ARENALES
+Seleccionar fila
+05/12
+Visita 1
+AREQUIPA
+Seleccionar fila
+05/12
+Visita 1
+AV PERU
+Seleccionar fila
+05/12
+Visita 1
+AYACUCHO
+Seleccionar fila
+05/12
+Visita 1
+BARRANCO
+Seleccionar fila
+05/12
+Visita 1
+BENAVIDES
+Seleccionar fila
+05/12
+Visita 1
+BREÑA
+Seleccionar fila
+05/12
+Visita 1
+CALLAO
+Seleccionar fila
+05/12
+Visita 1
+CAMINOS DEL INCA
+Seleccionar fila
+05/12
+Visita 1
+CHIMÚ
+Seleccionar fila
+05/12
+Visita 1
+CHORRILLOS
+Seleccionar fila
+05/12
+Visita 1
+ESCARDÓ
+Seleccionar fila
+05/12
+Visita 1
+HUANCAYO
+Seleccionar fila
+05/12
+Visita 1
+INDEPENDENCIA
+Seleccionar fila
+05/12
+Visita 1
+LA MOLINA
+Seleccionar fila
+05/12
+Visita 1
+LOS OLIVOS
+Seleccionar fila
+05/12
+Visita 1
+MIRAFLORES
+Seleccionar fila
+05/12
+Visita 1
+PIZARRO
+Seleccionar fila
+05/12
+Visita 1
+PORONGOCHE
+Seleccionar fila
+05/12
+Visita 1
+PUEBLO LIBRE
+Top Places
+Criterio
+Todas
+AV PERU
+MIRAFLORES
+ESCARDÓ
+LOS OLIVOS
+PUEBLO LIBRE
+ARENALES
+PORONGOCHE
+AREQUIPA
+RIVAGUERO
+SAN CARLOS
+SJL - ZARATE
+LA MOLINA
+VILLA EL SALV…
+HUANCAYO
+CHIMÚ
+CALLAO
+AYACUCHO
+SAN GERONIMO
+SAN ANDRES
+SURQUILLO
+SAN LUIS
+SURCO
+SUCRE
+PIZARRO
+BREÑA
+BENAVIDES
+INDEPENDEN…
+90 %
+84 %
+82 %
+82 %
+79 %
+78 %
+77 %
+77 %
+75 %
+75 %
+74 %
+73 %
+73 %
+71 %
+Venta sugestiva
+-
++
+142 %
+Microsoft Power BI
+Informe ampliado a 142 %
+
+440
+75%
+24
+34
