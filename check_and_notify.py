@@ -130,69 +130,83 @@ def parse_record_update(text: str) -> tuple[str | None, str | None]:
     m = re.search(r"([\d]{1,2}\s*-\s*([A-Za-z]{3})\s*[\d]{1,2}\s*:\s*[\d]{2})", t, re.IGNORECASE)
     return (m.group(1).strip(), m.group(2).strip().capitalize()) if m else (None, None)
 
-# ── Búsqueda automática en visual-containers ─────────────────────────────────
 async def click_filter_option(page, filter_label: str, option_text: str, deselect_all_first: bool = False):
-    """Intenta abrir el slicer con filter_label (clic en el centro o header) y busca option_text en toda la página."""
-    slicers = page.locator("visual-container")
-    count = await slicers.count()
-    for i in range(count):
-        slicer = slicers.nth(i)
+    for frame in page.frames:
         try:
-            slicer_text = await slicer.inner_text(timeout=3000)
-            if filter_label.lower() in slicer_text.lower():
-                # 1. Hacer clic para ABRIR el dropdown. PowerBI suele tener el hit target en el slicer
-                # Hacemos click en el borde superior o centro para abrirlo
-                try:
-                    await slicer.click(position={"x": 10, "y": 10})
-                except Exception:
-                    await slicer.click()
-                await page.wait_for_timeout(1000)
+            headers = frame.locator("h3.slicer-header-text").filter(has_text=filter_label)
+            if await headers.count() > 0:
+                container = headers.first.locator("xpath=ancestor::div[contains(@class, 'slicer-container')]").first
+                box = container.locator(".slicer-restatement")
+                
+                # Open dropdown
+                if await box.count() > 0:
+                    await box.first.click(force=True)
+                else:
+                    await container.click(force=True)
+                
+                await page.wait_for_timeout(1500)
 
-                # 2. Deseleccionar todo si es necesario (el menú ya está abierto)
+                # Click eraser to clear filters if present
+                clear_btn = container.locator(".clear-filter, i[title*='Borrar'], i[title*='Clear'], .slicer-clear")
+                if await clear_btn.count() > 0 and await clear_btn.first.is_visible():
+                    try:
+                        await clear_btn.first.click(force=True)
+                        await page.wait_for_timeout(1000)
+                    except:
+                        pass
+
                 if deselect_all_first:
-                    await deselect_all_in_frames(page)
-                    await page.wait_for_timeout(800)
+                    try:
+                        await deselect_all_in_frames(page)
+                        await page.wait_for_timeout(800)
+                        await deselect_all_in_frames(page)
+                    except: pass
+                    await page.wait_for_timeout(1000)
 
-                # 3. Seleccionar la opción en toda la página/frames
                 clicked = await click_option_in_frames(page, option_text)
                 
-                # 4. Cerrar el dropdown (repitiendo el clic en el slicer)
-                try:
-                    await slicer.click(position={"x": 10, "y": 10})
-                except Exception:
-                    await slicer.click()
+                # Close dropdown
+                if await box.count() > 0:
+                    await box.first.click(force=True)
+                else:
+                    await container.click(force=True)
+                    
                 await page.wait_for_timeout(1000)
-                
                 return clicked
         except Exception:
-            continue
+            pass
     return False
 
 # ── Búsqueda automática de opciones en los frames de Power BI ────────────────
 async def click_option_in_frames(page, option_text: str, wait_ms: int = 1000) -> bool:
-    """
-    Busca 'option_text' en todos los frames y hace clic.
-    Usa exact=False para tolerar espacios extra o texto parcial.
-    """
     for frame in page.frames:
-        for loc_expr in [
-            lambda f: f.get_by_text(option_text, exact=False),
-            lambda f: f.locator(f"span:text-is('{option_text}')"),
-            lambda f: f.locator(f"div:text-is('{option_text}')"),
-            lambda f: f.locator(f"[title='{option_text}']"),
-            lambda f: f.locator(f"[aria-label*='{option_text}']"),
-        ]:
-            try:
+        try:
+            slicer_items = frame.locator(".slicerItemContainer")
+            count = await slicer_items.count()
+            if count > 0:
+                for i in range(count):
+                    item = slicer_items.nth(i)
+                    if await item.is_visible():
+                        text = await item.inner_text()
+                        if option_text.lower() in text.lower():
+                            await item.click(force=True)
+                            await page.wait_for_timeout(wait_ms)
+                            return True
+            
+            for loc_expr in [
+                lambda f: f.get_by_text(option_text, exact=True),
+                lambda f: f.locator(f"span:has-text('{option_text}')"),
+            ]:
                 loc = loc_expr(frame)
                 cnt = await loc.count()
-                if cnt > 0:
-                    await loc.first.click()
-                    await page.wait_for_timeout(wait_ms)
-                    print(f"    ✅ Clic en '{option_text}'")
-                    return True
-            except Exception:
-                pass
-    print(f"    ⚠️ No se encontró '{option_text}' en ningún frame")
+                for i in range(cnt):
+                    el = loc.nth(i)
+                    if await el.is_visible():
+                        await el.click(force=True)
+                        await page.wait_for_timeout(wait_ms)
+                        return True
+        except Exception:
+            pass
     return False
 
 async def deselect_all_in_frames(page) -> bool:

@@ -19,22 +19,37 @@ async def get_page_text(page) -> str:
 
 async def click_option_in_frames(page, option_text: str, wait_ms: int = 1000) -> bool:
     for frame in page.frames:
-        for loc_expr in [
-            lambda f: f.get_by_text(option_text, exact=False),
-            lambda f: f.locator(f"span:text-is('{option_text}')"),
-            lambda f: f.locator(f"div:text-is('{option_text}')"),
-            lambda f: f.locator(f"[title='{option_text}']"),
-            lambda f: f.locator(f"[aria-label*='{option_text}']"),
-        ]:
-            try:
+        try:
+            # Primero intenta buscar dentro de las opciones de slicer propiamente dichas
+            slicer_items = frame.locator(".slicerItemContainer")
+            count = await slicer_items.count()
+            if count > 0:
+                for i in range(count):
+                    item = slicer_items.nth(i)
+                    if await item.is_visible():
+                        text = await item.inner_text()
+                        if option_text.lower() in text.lower():
+                            print(f"    - clicking .slicerItemContainer matching {option_text}")
+                            await item.click(force=True)
+                            await page.wait_for_timeout(wait_ms)
+                            return True
+            
+            # Fallback
+            for loc_expr in [
+                lambda f: f.get_by_text(option_text, exact=True),
+                lambda f: f.locator(f"span:has-text('{option_text}')"),
+            ]:
                 loc = loc_expr(frame)
                 cnt = await loc.count()
-                if cnt > 0:
-                    await loc.first.click()
-                    await page.wait_for_timeout(wait_ms)
-                    return True
-            except Exception:
-                pass
+                for i in range(cnt):
+                    el = loc.nth(i)
+                    if await el.is_visible():
+                        print(f"    - clicking fallback matching {option_text}")
+                        await el.click(force=True)
+                        await page.wait_for_timeout(wait_ms)
+                        return True
+        except Exception as e:
+            pass
     return False
 
 async def deselect_all_in_frames(page) -> bool:
@@ -44,34 +59,41 @@ async def deselect_all_in_frames(page) -> bool:
     return False
 
 async def click_filter_option(page, filter_label: str, option_text: str, deselect_all_first: bool = False):
-    slicers = page.locator("visual-container")
-    count = await slicers.count()
-    for i in range(count):
-        slicer = slicers.nth(i)
+    for frame in page.frames:
         try:
-            slicer_text = await slicer.inner_text(timeout=3000)
-            if filter_label.lower() in slicer_text.lower():
-                try:
-                    await slicer.click(position={"x": 10, "y": 10})
-                except Exception:
-                    await slicer.click()
-                await page.wait_for_timeout(1000)
+            headers = frame.locator("h3.slicer-header-text").filter(has_text=filter_label)
+            if await headers.count() > 0:
+                print(f"Found header for {filter_label}")
+                container = headers.first.locator("xpath=ancestor::div[contains(@class, 'slicer-container')]").first
+                
+                box = container.locator(".slicer-restatement")
+                if await box.count() > 0:
+                    await box.first.click(force=True)
+                else:
+                    await container.click(force=True)
+                
+                await page.wait_for_timeout(1500)
+                await page.screenshot(path=f"d:\\agente-powerbi\\log_{filter_label}_opened.png")
 
                 if deselect_all_first:
+                    print(f"Deselecting all for {filter_label}")
                     await deselect_all_in_frames(page)
-                    await page.wait_for_timeout(800)
+                    await page.wait_for_timeout(1000)
 
+                print(f"Clicking option {option_text}")
                 clicked = await click_option_in_frames(page, option_text)
+                await page.screenshot(path=f"d:\\agente-powerbi\\log_{filter_label}_selected.png")
                 
-                try:
-                    await slicer.click(position={"x": 10, "y": 10})
-                except Exception:
-                    await slicer.click()
+                # close dropdown
+                if await box.count() > 0:
+                    await box.first.click(force=True)
+                else:
+                    await container.click(force=True)
+                    
                 await page.wait_for_timeout(1000)
-                
                 return clicked
-        except Exception:
-            continue
+        except Exception as e:
+            pass
     return False
 
 async def main():

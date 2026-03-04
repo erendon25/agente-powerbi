@@ -15,34 +15,34 @@ Evaluación
 Best Place
 Growth
 EXPERIENCIA DE SERVICIO
-66 %
-barra de datos 69%
-AV PERU
+67 %
+barra de datos 70%
+PUEBLO LIBRE
 0.0
 RAPIDEZ DE SERVICIO
-79 %
+80 %
 barra de datos 84%
-AREQUIPA
+ARENALES
 0.0
 CALIDAD DEL PRODUCTO
-69 %
-barra de datos 73%
-AYACUCHO
+68 %
+barra de datos 72%
+AV PERU
 0.0
 FRESCURA DEL PRODUCTO
-79 %
-barra de datos 83%
-AV PERU
+80 %
+barra de datos 84%
+PIZARRO
 0.0
 APARIENCIA DEL EMPLEADO
 82 %
 barra de datos 87%
-PORONGOCHE
+AV PERU
 0.0
 AMBIENTE DE LA TIENDA
 95 %
 barra de datos 100%
-AREQUIPA
+AV PERU
 0.0
 Auditorias
 Items con nota
@@ -56,16 +56,14 @@ Oct
 Nov
 Dic
 Ene
-Feb
 2025
 2026
 75 %
-72 %
-79 %
 75 %
 75 %
 76 %
-77 %
+75 %
+79 %
 Resultado
 Meta
 Time Line General
@@ -79,71 +77,71 @@ Resultado
 Growth
  
 ¿Los ingredientes estaban bien distribuidos en su pizza?
+50 %
+0.09
+Si aplica, ¿el empleado que cobró manejó comida sin desinfectarse las manos con alcohol primero?
+74 %
+0.05
+¿La pizza estaba libre de burbujas grandes? (Burbujas iguales o más grandes de 1 cm en diámetro)
+81 %
+0.04
+¿El personal en caja ofreció el LTO?
 55 %
 0.04
 ¿Su pizza estaba cortada en 8 rebanadas uniformes y del mismo tamaño?
-59 %
-0.02
-¿El personal en caja ofreció el LTO?
-57 %
-0.01
-¿La pizza estaba libre de burbujas grandes? (Burbujas iguales o más grandes de 1 cm en diámetro)
-81 %
-0.01
+60 %
+0.03
+Si contestó que SI, ¿estaban todas las cajas abiertas?
+90 %
+0.03
 ¿El empleado lo saludó correctamente y dentro de los 5 segundos protocolares? (Buenos días/tardes/noches, bienvenido a Little Caesar`s ¿Cúales su pedido Hot - n - ready el día de hoy?
-53 %
-0.00
+56 %
+0.02
+¿El empleado llevaba un polo, gafete y gorra de Little Caesar’s y sus implementos estaban limpios?
+65 %
+0.01
+¿El colaborador validó la orden del cliente y por ende entregó el pedido correcto?
+86 %
+0.01
 ¿El empleado tiene un buen tono de voz e hizo contacto directo con usted?
-94 %
-0.00
-¿La caja se encontraba correctamente marcada, según el tipo de producto solicitado?
-81 %
-0.00
-Los pisos y baños se encontraban limpios y abastecidos con jabón y papel?
-95 %
+96 %
+0.01
+El área del mostrador estaba organizada, limpia y libre de basura?
+99 %
 0.00
 El exterior de la tienda y el letrero de abierto se encontraban correctamente iluminados?
-100 %
+99 %
 0.00
 Uñas no pintadas, no largas, no sucias, no despeinado, no barba, aretes pequeños, no pulseras, no relojes
 100 %
 0.00
+Las mesas y pisos de la tienda se encontraban organizados, limpios y sin rastros de residuos?
+83 %
+0.00
 ¿El empleado le dio atención directa a usted mientras tomaba su orden?
 97 %
 0.00
-¿El empleado llevaba un polo, gafete y gorra de Little Caesar’s y sus implementos estaban limpios?
-64 %
-0.00
-El área del mostrador estaba organizada, limpia y libre de basura?
-99 %
-0.00
-Si contestó que SI, ¿estaban todas las cajas abiertas?
-90 %
-0.00
-Las mesas y pisos de la tienda se encontraban organizados, limpios y sin rastros de residuos?
-83 %
--0.01
-¿El empleado se despidió correctamente? (Debe cerrar con un agradecimiento libre, pero mencionando la marca Little Caesars. Ejemplo: Gracias por venir a Little Caesars.)
-64 %
--0.01
 ¿El empleado realizó la venta sugestiva de productos adicionales a su orden?
-52 %
+53 %
+0.00
+Los pisos y baños se encontraban limpios y abastecidos con jabón y papel?
+95 %
 -0.01
 ¿El empleado marcó correctamente su orden y le entregó su comprobante?
-97 %
+99 %
+-0.01
+¿La caja se encontraba correctamente marcada, según el tipo de producto solicitado?
+77 %
 -0.01
 ¿Cuánto tiempo tardó desde que tomaron su orden hasta que le entregaron su producto? (Menos de 1:00 minuto / Más de 1:00 minuto)
 76 %
 -0.02
-Cuando tomaron su orden, ¿el producto estaba listo?
-76 %
--0.02
 Mes
-Todas
+Selección múltiple
 Supervisor
-Todas
+Selección múltiple
 Nro. Visita
-Todas
+Selección múltiple
 Desplazarse hacia arriba
 Desplazarse hacia abajo
 Desplazar a la izquierda
@@ -155,129 +153,129 @@ Visita
 Tienda
 Evidencia
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 ARENALES
 Seleccionar fila
-05/12
-Visita 1
-AREQUIPA
-Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 AV PERU
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 AYACUCHO
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 BARRANCO
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 BENAVIDES
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 BREÑA
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 CALLAO
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 CAMINOS DEL INCA
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 CHIMÚ
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 CHORRILLOS
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 ESCARDÓ
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 HUANCAYO
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 INDEPENDENCIA
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 LA MOLINA
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 LOS OLIVOS
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 MIRAFLORES
 Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 PIZARRO
 Seleccionar fila
-05/12
-Visita 1
-PORONGOCHE
-Seleccionar fila
-05/12
-Visita 1
+19/12
+Visita 2
 PUEBLO LIBRE
+Seleccionar fila
+19/12
+Visita 2
+RIVAGUERO
+Seleccionar fila
+19/12
+Visita 2
+SAN ANDRES
 Top Places
 Criterio
 Todas
 AV PERU
-MIRAFLORES
+PUEBLO LIBRE
 ESCARDÓ
 LOS OLIVOS
-PUEBLO LIBRE
 ARENALES
-PORONGOCHE
-AREQUIPA
-RIVAGUERO
-SAN CARLOS
-SJL - ZARATE
-LA MOLINA
-VILLA EL SALV…
-HUANCAYO
-CHIMÚ
-CALLAO
+MIRAFLORES
 AYACUCHO
-SAN GERONIMO
-SAN ANDRES
-SURQUILLO
-SAN LUIS
-SURCO
-SUCRE
-PIZARRO
+LA MOLINA
+CHIMÚ
+SJL - ZARATE
 BREÑA
+VILLA EL SALVADOR
+SUCRE
+HUANCAYO
+SAN CARLOS
+SURQUILLO
+PIZARRO
+SURCO
+SJL - SAN MARTIN
+RIVAGUERO
+CAMINOS DEL INCA
+CALLAO
+INDEPENDENCIA
+SAN LUIS
+SAN BORJA
 BENAVIDES
-INDEPENDEN…
-90 %
-84 %
-82 %
-82 %
+SAN ANDRES
+91 %
+83 %
+81 %
+77 %
+76 %
+80 %
 79 %
 78 %
-77 %
-77 %
+70 %
+69 %
 75 %
 75 %
 74 %
-73 %
-73 %
-71 %
+72 %
 Venta sugestiva
 -
 +
@@ -285,7 +283,7 @@ Venta sugestiva
 Microsoft Power BI
 Informe ampliado a 142 %
 
-440
-75%
+164
+76%
 24
-34
+29
