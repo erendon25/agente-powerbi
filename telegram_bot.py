@@ -154,29 +154,45 @@ async def click_table_row(page, tienda: str) -> bool:
 
 def parse_success_rate(text: str):
     """Extrae el porcentaje del 'Sucess Rate' del texto completo de la página."""
-    norm = " ".join(text.split())
+    
+    # ESTRATEGIA DEFINITIVA: PowerBI renderiza el texto de las métricas (Tarjetas) al final del DOM. 
+    # El Sucess Rate (ej. "86%") aparece en una línea propia hacia el final, separado de su título.
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    
+    # Revisar las últimas 60 líneas buscando una que sea exactamente "XX%" o "XX %"
+    valid_pcts = []
+    for line in lines[-60:]:
+        # Evitar ruidos comunes al final
+        if 'ampliado' in line.lower() or 'microsoft' in line.lower():
+            continue
+        m = re.fullmatch(r"(\d{1,3})\s*%", line)
+        if m:
+            val = int(m.group(1))
+            if 0 < val <= 100:
+                valid_pcts.append(val)
+                
+    if valid_pcts:
+        # El número de tarjeta que buscamos casi siempre está al final ("76%" en tu log)
+        logger.info(f"parse_success_rate → {valid_pcts[-1]}% (aislado al final del documento)")
+        return f"{valid_pcts[-1]}%"
+        
+    # FALLBACK en caso de que esté intercalado en el mismo flujo en lugar de aislado:
+    norm = " ".join(lines)
     strategies = [
-        # Número justo antes de "Sucess Rate"
-        r"(\d{1,3})\s*%\s*.{0,60}?Suce?ss\s+Rat",
-        # "Sucess Rate" seguido de número
-        r"Suce?ss\s+Rat.{0,200}?(\d{1,3})\s*%",
-        # "Resumen General" seguido de número
-        r"Resumen General.{0,200}?(\d{1,3})\s*%",
-        # "Items con nota  Sucess Rate  XX%"
         r"Items con nota\s+Suce?ss\s+Rat.{0,30}?(\d{1,3})\s*%",
+        r"Resumen General.{0,200}?(\d{1,3})\s*%",
+        r"(\d{1,3})\s*%\s*.{0,60}?Suce?ss\s+Rat",
+        r"Suce?ss\s+Rat.{0,200}?(\d{1,3})\s*%",
     ]
     for pattern in strategies:
         m = re.search(pattern, norm, re.IGNORECASE)
         if m:
-            # El grupo 1 puede ser el primero o el único capturado
             val = int(m.group(1))
             if 0 < val <= 100:
-                logger.info(f"parse_success_rate → {val}% (patrón: {pattern[:40]})")
+                logger.info(f"parse_success_rate fallback → {val}% (patrón: {pattern[:40]})")
                 return f"{val}%"
-    # Fallback: loguear fragmento cerca de "Sucess" para debugging
-    m2 = re.search(r".{0,100}Suce?ss.{0,100}", norm, re.IGNORECASE)
-    if m2:
-        logger.info(f"[DEBUG] Fragmento Sucess Rate: {m2.group()!r}")
+                
+    logger.warning("No se encontró Success Rate válido en el DOM.")
     return None
 
 # ─── Extracción principal ─────────────────────────────────────────────────────
