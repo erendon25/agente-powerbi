@@ -343,9 +343,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global CHAT_ID
     CHAT_ID = update.effective_chat.id
 
-    current_jobs = context.job_queue.get_jobs_by_name("powerbi_checker")
-    if not current_jobs:
-        context.job_queue.run_repeating(check_job, interval=3600, first=10, name="powerbi_checker")
+    if context.job_queue:
+        current_jobs = context.job_queue.get_jobs_by_name("powerbi_checker")
+        if not current_jobs:
+            context.job_queue.run_repeating(check_job, interval=3600, first=10, name="powerbi_checker")
 
     await update.message.reply_text(
         "✅ *Bot iniciado correctamente!*\n\n"
@@ -359,17 +360,22 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Revisión inmediata con reporte detallado por visita y tienda."""
-    await update.message.reply_text("🔍 Revisando PowerBI... (espera ~60 segundos).")
+    try:
+        await update.message.reply_text("🔍 Revisando PowerBI... (espera ~60 segundos).")
 
-    report = await extract_full_report()
+        report = await extract_full_report()
 
-    if report.get("record_update"):
-        mensaje = format_report_message(report)
-        await update.message.reply_text(mensaje, parse_mode="Markdown")
-    else:
-        await update.message.reply_text(
-            "⚠️ No pude leer los datos del PowerBI en este momento. Puede ser un error de carga."
-        )
+        if report.get("record_update"):
+            mensaje = format_report_message(report)
+            await update.message.reply_text(mensaje, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(
+                "⚠️ No pude leer los datos del PowerBI en este momento. Puede ser un error de carga."
+            )
+    except Exception as e:
+        if 'logger' in globals():
+            logger.error(f"Error en /reporte: {e}", exc_info=True)
+        await update.message.reply_text(f"❌ Ocurrió un error interno: {str(e)}")
 
 async def set_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cambia el intervalo de revisión automática."""
@@ -379,14 +385,26 @@ async def set_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⛔ El mínimo es 1 minuto.")
             return
 
-        current_jobs = context.job_queue.get_jobs_by_name("powerbi_checker")
-        for job in current_jobs:
-            job.schedule_removal()
+        if context.job_queue:
+            current_jobs = context.job_queue.get_jobs_by_name("powerbi_checker")
+            for job in current_jobs:
+                job.schedule_removal()
 
-        context.job_queue.run_repeating(check_job, interval=minutes * 60, first=5, name="powerbi_checker")
-        await update.message.reply_text(f"⏱️ Listo! Revisaré PowerBI cada *{minutes} minuto(s)*.", parse_mode="Markdown")
+            context.job_queue.run_repeating(check_job, interval=minutes * 60, first=5, name="powerbi_checker")
+            await update.message.reply_text(f"⏱️ Listo! Revisaré PowerBI cada *{minutes} minuto(s)*.", parse_mode="Markdown")
+        else:
+            await update.message.reply_text("❌ No está habilitado el planificador (job_queue).")
     except (IndexError, ValueError):
         await update.message.reply_text("Uso: /intervalo <minutos>\nEjemplo: /intervalo 60")
+
+import logging
+
+# Habilitar logs detallados para ver errores, muy útil
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 def main():
     if not TOKEN:
@@ -394,8 +412,11 @@ def main():
         return
 
     # Inicia el servidor web en un hilo paralelo (requerido por Render)
-    threading.Thread(target=run_dummy_server, daemon=True).start()
-    print(f"Servidor web iniciado.")
+    try:
+        threading.Thread(target=run_dummy_server, daemon=True).start()
+        print(f"Servidor web iniciado.")
+    except Exception as e:
+        logger.error(f"No se pudo iniciar servidor web: {e}")
 
     application = Application.builder().token(TOKEN).build()
 
@@ -403,7 +424,7 @@ def main():
     application.add_handler(CommandHandler("reporte", report_command))
     application.add_handler(CommandHandler("intervalo", set_interval))
 
-    print("🤖 Bot de Telegram activo, esperando /start...")
+    print("🤖 Bot de Telegram activo, esperando comandos...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
