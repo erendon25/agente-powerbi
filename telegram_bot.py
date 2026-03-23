@@ -134,6 +134,42 @@ async def click_filter_option(page, filter_label: str, option_text: str, deselec
             pass
     return False
 
+def parse_score_from_row(row_text: str) -> str:
+    matches = re.findall(r"(\d{1,3})\s*%", row_text)
+    valid = [int(x) for x in matches if 0 < int(x) <= 100]
+    if valid: return str(valid[0]) + "%"
+    matches_dec = re.findall(r"(\d{1,3})[.,]\d+", row_text)
+    valid_dec = [int(x) for x in matches_dec if 0 < int(x) <= 100]
+    if valid_dec: return str(valid_dec[0]) + "%"
+    return None
+
+async def find_score_in_table(page, tienda: str, visita: str):
+    tienda_norm = tienda.upper().strip()
+    visita_norm = visita.upper().strip()
+    row_selectors = ["tr", "div[role='row']", "[class*='row']", "[class*='tableRow']"]
+    for frame in page.frames:
+        for sel in row_selectors:
+            try:
+                rows = frame.locator(sel)
+                count = await rows.count()
+                for i in range(count):
+                    row = rows.nth(i)
+                    try:
+                        rt_peek = await row.inner_text(timeout=500)
+                        rt_norm = rt_peek.upper().strip()
+                        if tienda_norm in rt_norm and visita_norm in rt_norm:
+                            score = parse_score_from_row(rt_peek)
+                            if score: return score
+                        # También si solo está la tienda y un número (por slicer Nro. Visita)
+                        elif tienda_norm in rt_norm and re.search(r'\d', rt_norm):
+                            score = parse_score_from_row(rt_peek)
+                            if score: return score
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    return None
+
 async def extract_full_report() -> dict:
     """
     Extrae notas por Nro. de Visita para el mes actual
@@ -207,17 +243,24 @@ async def extract_full_report() -> dict:
         await click_filter_option(page, "Supervisor", "YOHN", deselect_all_first=True)
         await page.wait_for_timeout(1000)
 
+
+
         for visita in visitas:
             print(f"Filtrando {visita}...")
             await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True)
-            await page.wait_for_timeout(1500)
+            await page.wait_for_timeout(2500)
             
             for tienda in TIENDAS:
-                score = "Sin visita"
-                try:
+                score_table = await find_score_in_table(page, tienda, visita)
+                if score_table:
+                    score = score_table
+                    print(f" -> {tienda} (tabla): {score}")
+                else:
+                    score = "Sin visita"
+                    try:
                     clicked = False
                     for frame in page.frames:
-                        tienda_labels = frame.locator(f"text='{tienda}'")
+                        tienda_labels = frame.get_by_text(tienda, exact=True)
                         count = await tienda_labels.count()
                         for i in range(count):
                             lbl = tienda_labels.nth(i)
@@ -226,23 +269,42 @@ async def extract_full_report() -> dict:
                                     await lbl.scroll_into_view_if_needed()
                                     await lbl.click(force=True)
                                     clicked = True
-                                    await page.wait_for_timeout(2000)
+                                    await page.wait_for_timeout(3500) # Un poco más de tiempo para que cargue
                                     text = await get_page_text(page)
                                     
-                                    m_score = re.search(r"(\d{1,3})\s*%\s*\n*.*Suce?ss\s+Rate", text, re.IGNORECASE)
-                                    if m_score:
-                                        score = m_score.group(1) + "%"
-                                    else:
-                                        m_score2 = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", text, re.IGNORECASE)
-                                        if m_score2:
-                                            score = m_score2.group(1) + "%"
-                                        else:
-                                            rg = re.search(r"Resumen General[^%]{0,150}?(\d{1,3})\s*%", text, re.IGNORECASE)
-                                            score = rg.group(1) + "%" if rg else "Sin visita"
+                                    # Normalizar texto (cambiar saltos de línea por espacios)
+                                    norm_text = " ".join(text.split())
+                                    
+                                    score = None
+                                    
+                                    # Estrategias de parseo mejoradas
+                                    
+                                    # 1. Buscar "Success Rate" (puede estar antes o después)
+                                    m = re.search(r"(\d{1,3})\s*%\s*.*Suce?ss\s+Rat", norm_text, re.IGNORECASE)
+                                    if m:
+                                        score = m.group(1) + "%"
+                                    if not score:
+                                        m = re.search(r"Suce?ss\s*Rat[^%]{0,200}?(\d{1,3})\s*%", norm_text, re.IGNORECASE)
+                                        if m:
+                                            score = m.group(1) + "%"
+                                    
+                                    # 2. Buscar "Resumen General"
+                                    if not score:
+                                        m = re.search(r"Resumen General[^%]{0,200}?(\d{1,3})\s*%", norm_text, re.IGNORECASE)
+                                        if m:
+                                            score = m.group(1) + "%"
+                                            
+                                    # 3. Buscar "Nota"
+                                    if not score:
+                                        m = re.search(r"Nota\D{0,30}?(\d{1,3})\s*%", norm_text, re.IGNORECASE)
+                                        if m:
+                                            score = m.group(1) + "%"
+                                            
+                                    score = score if score else "Sin visita"
                                     
                                     # Deseleccionar la tienda actual
                                     await lbl.click(force=True)
-                                    await page.wait_for_timeout(500)
+                                    await page.wait_for_timeout(1000)
                                     break
                                 except Exception:
                                     pass
