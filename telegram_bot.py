@@ -311,8 +311,8 @@ async def extract_full_report() -> dict:
                     except Exception as e:
                         if 'logger' in globals(): logger.warning(f"Error general en {tienda}: {e}")
                 
-                    print(f" -> {tienda}: {score}")
-                    result["tiendas"][tienda][visita] = score
+                print(f" -> {tienda}: {score}")
+                result["tiendas"][tienda][visita] = score
 
         await context.close()
         await browser.close()
