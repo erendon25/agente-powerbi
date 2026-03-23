@@ -134,41 +134,74 @@ async def click_filter_option(page, filter_label: str, option_text: str, deselec
             pass
     return False
 
-def parse_score_from_row(row_text: str) -> str:
-    matches = re.findall(r"(\d{1,3})\s*%", row_text)
-    valid = [int(x) for x in matches if 0 < int(x) <= 100]
-    if valid: return str(valid[0]) + "%"
-    matches_dec = re.findall(r"(\d{1,3})[.,]\d+", row_text)
-    valid_dec = [int(x) for x in matches_dec if 0 < int(x) <= 100]
-    if valid_dec: return str(valid_dec[0]) + "%"
+def parse_success_rate_from_text(text: str):
+    """Extrae el % del Sucess Rate (el donut grande de resumen) del texto completo de la página."""
+    normalized = " ".join(text.split())
+    
+    # Estrategia 1: número antes de "Sucess Rate" o "Success Rate"
+    m = re.search(r"(\d{1,3})\s*%\s*[^%]{0,60}?Suce?ss\s+Rat", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            return str(val) + "%"
+    
+    # Estrategia 2: "Sucess Rate" seguido del %
+    m = re.search(r"Suce?ss\s+Rat[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            return str(val) + "%"
+    
+    # Estrategia 3: buscar en sección "Resumen General"
+    m = re.search(r"Resumen General[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            return str(val) + "%"
+    
+    # Estrategia 4: Buscar "Auditorias ... Items con nota ... Sucess Rate ... N%" después de hacer clic en tabla
+    # Formato típico: "164 76% 24 29" donde 76% es el Sucess Rate
+    m = re.search(r"Items con nota\s+Suce?ss\s+Rat[^%\d]{0,30}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            return str(val) + "%"
+    
     return None
 
-async def find_score_in_table(page, tienda: str, visita: str):
+async def find_and_click_store_row(page, tienda: str):
+    """Hace clic en la fila de la tienda en la tabla de visitas y devuelve True si tuvo éxito."""
     tienda_norm = tienda.upper().strip()
-    visita_norm = visita.upper().strip()
     row_selectors = ["tr", "div[role='row']", "[class*='row']", "[class*='tableRow']"]
+    
     for frame in page.frames:
         for sel in row_selectors:
             try:
                 rows = frame.locator(sel)
                 count = await rows.count()
+                if count < 2:
+                    continue
+                    
+                print(f"  [{tienda}] Buscando en {count} filas con selector '{sel}'...")
+                
                 for i in range(count):
                     row = rows.nth(i)
                     try:
-                        rt_peek = await row.inner_text(timeout=500)
-                        rt_norm = rt_peek.upper().strip()
-                        if tienda_norm in rt_norm and visita_norm in rt_norm:
-                            score = parse_score_from_row(rt_peek)
-                            if score: return score
-                        # También si solo está la tienda y un número (por slicer Nro. Visita)
-                        elif tienda_norm in rt_norm and re.search(r'\d', rt_norm):
-                            score = parse_score_from_row(rt_peek)
-                            if score: return score
+                        rt = await row.inner_text(timeout=500)
+                        rt_norm = rt.upper().strip()
+                        
+                        # La fila debe tener el nombre de la tienda
+                        if tienda_norm in rt_norm:
+                            print(f"  [{tienda}] Fila encontrada: {repr(rt[:80])}")
+                            await row.click(force=True)
+                            return True
                     except Exception:
                         pass
             except Exception:
                 pass
-    return None
+    
+    print(f"  [{tienda}] ❌ No se encontró fila en ningún frame/selector")
+    return False
 
 async def extract_full_report() -> dict:
     """
@@ -235,84 +268,60 @@ async def extract_full_report() -> dict:
 
         visitas = ["Visita 1", "Visita 2"]
 
+
         # Filtros globales (Mes, Supervisor) se aplican una sola vez
         print("Aplicando filtros globales...")
         await click_filter_option(page, "Mes", mes_actual, deselect_all_first=True)
-        await page.wait_for_timeout(1000)
+        await page.wait_for_timeout(1500)
         
         await click_filter_option(page, "Supervisor", "YOHN", deselect_all_first=True)
-        await page.wait_for_timeout(1000)
-
-
+        await page.wait_for_timeout(1500)
 
         for visita in visitas:
-            print(f"Filtrando {visita}...")
-            await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True)
-            await page.wait_for_timeout(2500)
+            print(f"\n=== Procesando {visita} ===")
+            # Seleccionar solo esta visita en el slicer
+            filtrado = await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True)
+            print(f"  Filtro Nro. Visita aplicado: {filtrado}")
+            await page.wait_for_timeout(3000)  # Esperar render
             
             for tienda in TIENDAS:
-                score_table = await find_score_in_table(page, tienda, visita)
-                if score_table:
-                    score = score_table
-                    print(f" -> {tienda} (tabla): {score}")
-                else:
-                    score = "Sin visita"
-                    try:
-                        clicked = False
-                        for frame in page.frames:
-                            tienda_labels = frame.get_by_text(tienda, exact=True)
-                            count = await tienda_labels.count()
-                            for i in range(count):
-                                lbl = tienda_labels.nth(i)
-                                if await lbl.is_visible():
-                                    try:
-                                        await lbl.scroll_into_view_if_needed()
-                                        await lbl.click(force=True)
-                                        clicked = True
-                                        await page.wait_for_timeout(3500) # Un poco más de tiempo para que cargue
-                                        text = await get_page_text(page)
-                                        
-                                        # Normalizar texto (cambiar saltos de línea por espacios)
-                                        norm_text = " ".join(text.split())
-                                        if 'logger' in globals(): logger.info(f"[{tienda} - {visita}] Texto extraido: {norm_text[:200]}...")
-                                        
-                                        score = None
-                                        
-                                        # Estrategias de parseo mejoradas
-                                        m = re.search(r"(\d{1,3})\s*%\s*.*Suce?ss\s+Rat", norm_text, re.IGNORECASE)
-                                        if m:
-                                            score = m.group(1) + "%"
-                                        if not score:
-                                            m = re.search(r"Suce?ss\s*Rat[^%]{0,200}?(\d{1,3})\s*%", norm_text, re.IGNORECASE)
-                                            if m:
-                                                score = m.group(1) + "%"
-                                        
-                                        if not score:
-                                            m = re.search(r"Resumen General[^%]{0,200}?(\d{1,3})\s*%", norm_text, re.IGNORECASE)
-                                            if m:
-                                                score = m.group(1) + "%"
-                                                
-                                        if not score:
-                                            m = re.search(r"Nota\D{0,30}?(\d{1,3})\s*%", norm_text, re.IGNORECASE)
-                                            if m:
-                                                score = m.group(1) + "%"
-                                                
-                                        score = score if score else "Sin visita"
-                                        if 'logger' in globals(): logger.info(f"[{tienda} - {visita}] Score final: {score}")
-                                        
-                                        # Deseleccionar la tienda actual
-                                        await lbl.click(force=True)
-                                        await page.wait_for_timeout(1000)
-                                        break
-                                    except Exception as e:
-                                        if 'logger' in globals(): logger.warning(f"Error parseando {tienda}: {e}")
-                            if clicked:
-                                break
-                    except Exception as e:
-                        if 'logger' in globals(): logger.warning(f"Error general en {tienda}: {e}")
+                print(f"\n  -> Buscando: {tienda} | {visita}")
+                score = "Sin visita"
+                try:
+                    # Hacer clic en la fila de la tienda en la tabla
+                    clicked = await find_and_click_store_row(page, tienda)
+                    
+                    if clicked:
+                        await page.wait_for_timeout(3000)  # Esperar que el panel se actualice
+                        page_raw = await get_page_text(page)
+                        norm_text = " ".join(page_raw.split())
+                        
+                        # Primeros 400 chars para debug en logs de Render
+                        # Buscar la sección "Auditorias - Items con nota - Sucess Rate"
+                        print(f"  [LOG] Texto (400 chars): {norm_text[:400]}")
+                        
+                        parsed = parse_success_rate_from_text(page_raw)
+                        if parsed:
+                            score = parsed
+                            print(f"  ✅ Score encontrado: {score}")
+                        else:
+                            print(f"  ⚠️ No se encontró score en el texto. Revisá los logs de Render.")
+                        
+                        # Deseleccionar la fila haciendo clic neutro en área vacía
+                        try:
+                            await page.mouse.click(500, 20)
+                            await page.wait_for_timeout(800)
+                        except Exception:
+                            pass
+                    else:
+                        print(f"  ⚠️ No se pudo hacer clic en fila de {tienda}")
+                        
+                except Exception as e:
+                    print(f"  ❌ Error procesando {tienda}: {e}")
                 
-                print(f" -> {tienda}: {score}")
+                print(f"  RESULTADO {tienda} | {visita}: {score}")
                 result["tiendas"][tienda][visita] = score
+
 
         await context.close()
         await browser.close()
