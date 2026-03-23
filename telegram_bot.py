@@ -258,63 +258,61 @@ async def extract_full_report() -> dict:
                 else:
                     score = "Sin visita"
                     try:
-                    clicked = False
-                    for frame in page.frames:
-                        tienda_labels = frame.get_by_text(tienda, exact=True)
-                        count = await tienda_labels.count()
-                        for i in range(count):
-                            lbl = tienda_labels.nth(i)
-                            if await lbl.is_visible():
-                                try:
-                                    await lbl.scroll_into_view_if_needed()
-                                    await lbl.click(force=True)
-                                    clicked = True
-                                    await page.wait_for_timeout(3500) # Un poco más de tiempo para que cargue
-                                    text = await get_page_text(page)
-                                    
-                                    # Normalizar texto (cambiar saltos de línea por espacios)
-                                    norm_text = " ".join(text.split())
-                                    
-                                    score = None
-                                    
-                                    # Estrategias de parseo mejoradas
-                                    
-                                    # 1. Buscar "Success Rate" (puede estar antes o después)
-                                    m = re.search(r"(\d{1,3})\s*%\s*.*Suce?ss\s+Rat", norm_text, re.IGNORECASE)
-                                    if m:
-                                        score = m.group(1) + "%"
-                                    if not score:
-                                        m = re.search(r"Suce?ss\s*Rat[^%]{0,200}?(\d{1,3})\s*%", norm_text, re.IGNORECASE)
+                        clicked = False
+                        for frame in page.frames:
+                            tienda_labels = frame.get_by_text(tienda, exact=True)
+                            count = await tienda_labels.count()
+                            for i in range(count):
+                                lbl = tienda_labels.nth(i)
+                                if await lbl.is_visible():
+                                    try:
+                                        await lbl.scroll_into_view_if_needed()
+                                        await lbl.click(force=True)
+                                        clicked = True
+                                        await page.wait_for_timeout(3500) # Un poco más de tiempo para que cargue
+                                        text = await get_page_text(page)
+                                        
+                                        # Normalizar texto (cambiar saltos de línea por espacios)
+                                        norm_text = " ".join(text.split())
+                                        if 'logger' in globals(): logger.info(f"[{tienda} - {visita}] Texto extraido: {norm_text[:200]}...")
+                                        
+                                        score = None
+                                        
+                                        # Estrategias de parseo mejoradas
+                                        m = re.search(r"(\d{1,3})\s*%\s*.*Suce?ss\s+Rat", norm_text, re.IGNORECASE)
                                         if m:
                                             score = m.group(1) + "%"
-                                    
-                                    # 2. Buscar "Resumen General"
-                                    if not score:
-                                        m = re.search(r"Resumen General[^%]{0,200}?(\d{1,3})\s*%", norm_text, re.IGNORECASE)
-                                        if m:
-                                            score = m.group(1) + "%"
-                                            
-                                    # 3. Buscar "Nota"
-                                    if not score:
-                                        m = re.search(r"Nota\D{0,30}?(\d{1,3})\s*%", norm_text, re.IGNORECASE)
-                                        if m:
-                                            score = m.group(1) + "%"
-                                            
-                                    score = score if score else "Sin visita"
-                                    
-                                    # Deseleccionar la tienda actual
-                                    await lbl.click(force=True)
-                                    await page.wait_for_timeout(1000)
-                                    break
-                                except Exception:
-                                    pass
-                        if clicked:
-                            break
-                except Exception:
-                    pass
+                                        if not score:
+                                            m = re.search(r"Suce?ss\s*Rat[^%]{0,200}?(\d{1,3})\s*%", norm_text, re.IGNORECASE)
+                                            if m:
+                                                score = m.group(1) + "%"
+                                        
+                                        if not score:
+                                            m = re.search(r"Resumen General[^%]{0,200}?(\d{1,3})\s*%", norm_text, re.IGNORECASE)
+                                            if m:
+                                                score = m.group(1) + "%"
+                                                
+                                        if not score:
+                                            m = re.search(r"Nota\D{0,30}?(\d{1,3})\s*%", norm_text, re.IGNORECASE)
+                                            if m:
+                                                score = m.group(1) + "%"
+                                                
+                                        score = score if score else "Sin visita"
+                                        if 'logger' in globals(): logger.info(f"[{tienda} - {visita}] Score final: {score}")
+                                        
+                                        # Deseleccionar la tienda actual
+                                        await lbl.click(force=True)
+                                        await page.wait_for_timeout(1000)
+                                        break
+                                    except Exception as e:
+                                        if 'logger' in globals(): logger.warning(f"Error parseando {tienda}: {e}")
+                            if clicked:
+                                break
+                    except Exception as e:
+                        if 'logger' in globals(): logger.warning(f"Error general en {tienda}: {e}")
                 
-                print(f" -> {tienda}: {score}")
-                result["tiendas"][tienda][visita] = score
+                    print(f" -> {tienda}: {score}")
+                    result["tiendas"][tienda][visita] = score
 
         await context.close()
         await browser.close()
