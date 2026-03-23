@@ -1,500 +1,433 @@
 import asyncio
+import logging
 import os
 import re
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
 from playwright.async_api import async_playwright
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-# Servidor web falso para que Render (plan gratis) permita alojarlo
+# ─── Logging ──────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+# ─── Config ───────────────────────────────────────────────────────────────────
+TOKEN   = os.getenv("TELEGRAM_TOKEN", "8759492692:AAHwjW2Lho1wynrFLpct_FxAO4bVFapK3nM")
+URL     = ("https://app.powerbi.com/view?r=eyJrIjoiZWQ1YWNiYjctNWNiNC00MTNlLThjOG"
+           "EtNjE1NDc2NTI4NWU2IiwidCI6ImE4MzE3NzZjLWM0ZTUtNDNhMC04ZmZhLTFkNjIxZW"
+           "NlZDAzNiIsImMiOjl9")
+
+TIENDAS       = ["PORONGOCHE", "MALL PORONGOCHE"]
+TIENDA_EMOJIS = {"PORONGOCHE": "🏪", "MALL PORONGOCHE": "🏬"}
+MESES_ES      = {
+    1:"Ene", 2:"Feb", 3:"Mar", 4:"Abr", 5:"May", 6:"Jun",
+    7:"Jul", 8:"Ago", 9:"Set", 10:"Oct", 11:"Nov", 12:"Dic",
+}
+
+CHAT_ID     = None
+LAST_RECORD = None
+
+# ─── Servidor web dummy (Render plan gratis necesita un puerto abierto) ───────
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/html")
         self.end_headers()
-        self.wfile.write(b"Bot de PowerBI funcionando!")
-    def log_message(self, format, *args):
-        pass  # Silenciar logs de HTTP
+        self.wfile.write(b"Bot PowerBI OK")
+    def log_message(self, *a): pass
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), DummyHandler)
-    server.serve_forever()
+    HTTPServer(("0.0.0.0", port), DummyHandler).serve_forever()
 
-# URL del PowerBI
-URL = "https://app.powerbi.com/view?r=eyJrIjoiZWQ1YWNiYjctNWNiNC00MTNlLThjOGEtNjE1NDc2NTI4NWU2IiwidCI6ImE4MzE3NzZjLWM0ZTUtNDNhMC04ZmZhLTFkNjIxZWNlZDAzNiIsImMiOjl9"
-
-# Token del bot de Telegram (desde variable de entorno o valor por defecto)
-TOKEN = os.getenv("TELEGRAM_TOKEN", "8759492692:AAHwjW2Lho1wynrFLpct_FxAO4bVFapK3nM")
-CHAT_ID = None   # Se guarda automáticamente cuando haces /start
-LAST_RECORD = None
-
-# Tiendas a reportar
-TIENDAS = ["PORONGOCHE", "MALL PORONGOCHE"]
-TIENDA_EMOJIS = {"PORONGOCHE": "🏪", "MALL PORONGOCHE": "🏬"}
-
-# Meses en español
-MESES_ES = {
-    1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr",
-    5: "May", 6: "Jun", 7: "Jul", 8: "Ago",
-    9: "Set", 10: "Oct", 11: "Nov", 12: "Dic"
-}
-
-async def get_page_text(page) -> str:
-    text_content = ""
-    for frame in page.frames:
+# ─── Utilidades Playwright ────────────────────────────────────────────────────
+async def page_text(page) -> str:
+    txt = ""
+    for f in page.frames:
         try:
-            text = await frame.inner_text("body", timeout=5000)
-            text_content += text + "\n"
+            txt += await f.inner_text("body", timeout=5000) + "\n"
         except Exception:
             pass
-    return text_content
+    return txt
 
-async def click_option_in_frames(page, option_text: str, wait_ms: int = 1000) -> bool:
+async def click_slicer_option(page, label: str, option: str):
+    """Abre el dropdown del slicer 'label' y selecciona 'option'."""
     for frame in page.frames:
         try:
-            slicer_items = frame.locator(".slicerItemContainer")
-            count = await slicer_items.count()
-            if count > 0:
-                for i in range(count):
-                    item = slicer_items.nth(i)
-                    if await item.is_visible():
-                        text = await item.inner_text()
-                        if option_text.lower() in text.lower():
-                            await item.click(force=True)
-                            await page.wait_for_timeout(wait_ms)
-                            return True
-            
-            for loc_expr in [
-                lambda f: f.get_by_text(option_text, exact=True),
-                lambda f: f.locator(f"span:has-text('{option_text}')"),
-            ]:
-                loc = loc_expr(frame)
-                cnt = await loc.count()
+            headers = frame.locator("h3.slicer-header-text").filter(has_text=label)
+            if await headers.count() == 0:
+                continue
+            container = headers.first.locator(
+                "xpath=ancestor::div[contains(@class,'slicer-container')]"
+            ).first
+            box = container.locator(".slicer-restatement")
+
+            # Abrir dropdown
+            if await box.count() > 0:
+                await box.first.click(force=True)
+            else:
+                await container.click(force=True)
+            await page.wait_for_timeout(1200)
+
+            # Limpiar selección actual si existe botón borrar
+            clear = container.locator(
+                ".clear-filter, i[title*='Borrar'], i[title*='Clear'], .slicer-clear"
+            )
+            if await clear.count() > 0 and await clear.first.is_visible():
+                await clear.first.click(force=True)
+                await page.wait_for_timeout(800)
+
+            # Hacer "Seleccionar todo" primero para deseleccionar todo (toggle)
+            for select_all_text in ["Seleccionar todo", "Select all"]:
+                items = frame.locator(".slicerItemContainer")
+                cnt = await items.count()
                 for i in range(cnt):
-                    el = loc.nth(i)
-                    if await el.is_visible():
-                        await el.click(force=True)
-                        await page.wait_for_timeout(wait_ms)
-                        return True
-        except Exception:
-            pass
+                    item = items.nth(i)
+                    t = await item.inner_text()
+                    if select_all_text.lower() in t.lower() and await item.is_visible():
+                        await item.click(force=True)
+                        await page.wait_for_timeout(500)
+                        await item.click(force=True)  # segunda vez para deseleccionar todo
+                        await page.wait_for_timeout(500)
+                        break
+
+            # Seleccionar la opción deseada
+            items = frame.locator(".slicerItemContainer")
+            cnt = await items.count()
+            for i in range(cnt):
+                item = items.nth(i)
+                t = await item.inner_text()
+                if option.lower() in t.lower() and await item.is_visible():
+                    await item.click(force=True)
+                    await page.wait_for_timeout(500)
+                    logger.info(f"Slicer '{label}' → '{option}' ✅")
+                    # Cerrar dropdown
+                    if await box.count() > 0:
+                        await box.first.click(force=True)
+                    else:
+                        await container.click(force=True)
+                    await page.wait_for_timeout(800)
+                    return True
+
+            # Cerrar aunque no se encontró
+            if await box.count() > 0:
+                await box.first.click(force=True)
+            else:
+                await container.click(force=True)
+            await page.wait_for_timeout(500)
+        except Exception as e:
+            logger.warning(f"click_slicer_option('{label}','{option}'): {e}")
+    logger.warning(f"Slicer '{label}' → '{option}' ❌ no encontrado")
     return False
 
-async def deselect_all_in_frames(page) -> bool:
-    for text in ["Seleccionar todo", "Select all"]:
-        if await click_option_in_frames(page, text, wait_ms=600):
-            return True
-    return False
-
-async def click_filter_option(page, filter_label: str, option_text: str, deselect_all_first: bool = False):
-    for frame in page.frames:
-        try:
-            headers = frame.locator("h3.slicer-header-text").filter(has_text=filter_label)
-            if await headers.count() > 0:
-                container = headers.first.locator("xpath=ancestor::div[contains(@class, 'slicer-container')]").first
-                box = container.locator(".slicer-restatement")
-                
-                if await box.count() > 0:
-                    await box.first.click(force=True)
-                else:
-                    await container.click(force=True)
-                
-                await page.wait_for_timeout(1500)
-
-                clear_btn = container.locator(".clear-filter, i[title*='Borrar'], i[title*='Clear'], .slicer-clear")
-                if await clear_btn.count() > 0 and await clear_btn.first.is_visible():
-                    try:
-                        await clear_btn.first.click(force=True)
-                        await page.wait_for_timeout(1000)
-                    except:
-                        pass
-
-                if deselect_all_first:
-                    try:
-                        # Optional double toggle
-                        await deselect_all_in_frames(page)
-                        await page.wait_for_timeout(800)
-                        await deselect_all_in_frames(page)
-                    except: pass
-                    await page.wait_for_timeout(1000)
-
-                clicked = await click_option_in_frames(page, option_text)
-                
-                if await box.count() > 0:
-                    await box.first.click(force=True)
-                else:
-                    await container.click(force=True)
-                    
-                await page.wait_for_timeout(1000)
-                return clicked
-        except Exception:
-            pass
-    return False
-
-def parse_success_rate_from_text(text: str):
-    """Extrae el % del Sucess Rate (el donut grande de resumen) del texto completo de la página."""
-    normalized = " ".join(text.split())
-    
-    # Estrategia 1: número antes de "Sucess Rate" o "Success Rate"
-    m = re.search(r"(\d{1,3})\s*%\s*[^%]{0,60}?Suce?ss\s+Rat", normalized, re.IGNORECASE)
-    if m:
-        val = int(m.group(1))
-        if 0 < val <= 100:
-            return str(val) + "%"
-    
-    # Estrategia 2: "Sucess Rate" seguido del %
-    m = re.search(r"Suce?ss\s+Rat[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
-    if m:
-        val = int(m.group(1))
-        if 0 < val <= 100:
-            return str(val) + "%"
-    
-    # Estrategia 3: buscar en sección "Resumen General"
-    m = re.search(r"Resumen General[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
-    if m:
-        val = int(m.group(1))
-        if 0 < val <= 100:
-            return str(val) + "%"
-    
-    # Estrategia 4: Buscar "Auditorias ... Items con nota ... Sucess Rate ... N%" después de hacer clic en tabla
-    # Formato típico: "164 76% 24 29" donde 76% es el Sucess Rate
-    m = re.search(r"Items con nota\s+Suce?ss\s+Rat[^%\d]{0,30}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
-    if m:
-        val = int(m.group(1))
-        if 0 < val <= 100:
-            return str(val) + "%"
-    
-    return None
-
-async def find_and_click_store_row(page, tienda: str):
-    """Hace clic en la fila de la tienda en la tabla de visitas y devuelve True si tuvo éxito."""
-    tienda_norm = tienda.upper().strip()
-    row_selectors = ["tr", "div[role='row']", "[class*='row']", "[class*='tableRow']"]
-    
+async def click_table_row(page, tienda: str) -> bool:
+    """Hace clic en la fila de la tabla que contiene el nombre de tienda."""
+    tienda_up = tienda.upper()
+    row_selectors = ["tr", "div[role='row']", "[class*='tableRow']", "[class*='row']"]
     for frame in page.frames:
         for sel in row_selectors:
             try:
                 rows = frame.locator(sel)
-                count = await rows.count()
-                if count < 2:
+                cnt = await rows.count()
+                if cnt < 2:
                     continue
-                    
-                print(f"  [{tienda}] Buscando en {count} filas con selector '{sel}'...")
-                
-                for i in range(count):
+                for i in range(cnt):
                     row = rows.nth(i)
                     try:
-                        rt = await row.inner_text(timeout=500)
-                        rt_norm = rt.upper().strip()
-                        
-                        # La fila debe tener el nombre de la tienda
-                        if tienda_norm in rt_norm:
-                            print(f"  [{tienda}] Fila encontrada: {repr(rt[:80])}")
+                        rt = (await row.inner_text(timeout=400)).upper().strip()
+                        if tienda_up in rt:
+                            logger.info(f"Fila '{tienda}' encontrada: {rt[:80]!r}")
                             await row.click(force=True)
                             return True
                     except Exception:
                         pass
             except Exception:
                 pass
-    
-    print(f"  [{tienda}] ❌ No se encontró fila en ningún frame/selector")
+    logger.warning(f"No se encontró fila para '{tienda}'")
     return False
 
-async def extract_full_report() -> dict:
-    """
-    Extrae notas por Nro. de Visita para el mes actual
-    para Porongoche y Mall Porongoche bajo supervisor YOHN.
-    """
-    now = datetime.utcnow()
-    mes_actual = MESES_ES[now.month]
-    consent_selectors = [
-        "button:has-text('Accept')", "button:has-text('Aceptar')",
-        "button:has-text('I accept')", "button:has-text('Continue')",
-        "button:has-text('OK')", "[id*='accept']", "[class*='consent']",
+def parse_success_rate(text: str):
+    """Extrae el porcentaje del 'Sucess Rate' del texto completo de la página."""
+    norm = " ".join(text.split())
+    strategies = [
+        # Número justo antes de "Sucess Rate"
+        r"(\d{1,3})\s*%\s*.{0,60}?Suce?ss\s+Rat",
+        # "Sucess Rate" seguido de número
+        r"Suce?ss\s+Rat.{0,200}?(\d{1,3})\s*%",
+        # "Resumen General" seguido de número
+        r"Resumen General.{0,200}?(\d{1,3})\s*%",
+        # "Items con nota  Sucess Rate  XX%"
+        r"Items con nota\s+Suce?ss\s+Rat.{0,30}?(\d{1,3})\s*%",
     ]
+    for pattern in strategies:
+        m = re.search(pattern, norm, re.IGNORECASE)
+        if m:
+            # El grupo 1 puede ser el primero o el único capturado
+            val = int(m.group(1))
+            if 0 < val <= 100:
+                logger.info(f"parse_success_rate → {val}% (patrón: {pattern[:40]})")
+                return f"{val}%"
+    # Fallback: loguear fragmento cerca de "Sucess" para debugging
+    m2 = re.search(r".{0,100}Suce?ss.{0,100}", norm, re.IGNORECASE)
+    if m2:
+        logger.info(f"[DEBUG] Fragmento Sucess Rate: {m2.group()!r}")
+    return None
+
+# ─── Extracción principal ─────────────────────────────────────────────────────
+async def extract_full_report() -> dict:
+    now = datetime.utcnow()
+    # Ajustar a hora Perú (UTC-5)
+    mes_idx = now.month if (now.hour - 5) >= 0 else (now.month - 1 or 12)
+    mes_actual = MESES_ES[mes_idx]
+    logger.info(f"Mes inicial: {mes_actual}")
 
     result = {
         "record_update": None,
         "mes": mes_actual,
-        "tiendas": {t: {} for t in TIENDAS}
+        "tiendas": {t: {} for t in TIENDAS},
     }
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-            headless=True
+            headless=True,
         )
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        ctx = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            ),
             viewport={"width": 1920, "height": 1080},
-            locale="es-PE"
+            locale="es-PE",
         )
-        page = await context.new_page()
+        page = await ctx.new_page()
 
-        # Carga inicial para sacar RecordUpdate
+        # ── Cargar página ────────────────────────────────────────────────────
+        logger.info("Cargando PowerBI...")
         try:
             await page.goto(URL, wait_until="networkidle", timeout=90000)
         except Exception:
             await page.goto(URL, wait_until="domcontentloaded", timeout=90000)
 
-        for sel in consent_selectors:
+        # Aceptar cookies si aparecen
+        for sel in ["button:has-text('Accept')", "button:has-text('Aceptar')", "button:has-text('OK')"]:
             try:
-                btn = page.locator(sel).first
-                if await btn.is_visible(timeout=2000):
-                    await btn.click()
-                    await page.wait_for_timeout(1000)
+                b = page.locator(sel).first
+                if await b.is_visible(timeout=1500):
+                    await b.click()
+                    await page.wait_for_timeout(800)
             except Exception:
                 pass
 
+        logger.info("Esperando render inicial (12s)...")
         await page.wait_for_timeout(12000)
-        text_inicial = await get_page_text(page)
 
-        # Extraer RecordUpdate
-        text_norm = re.sub(r'RecordUpdat\s*e', 'RecordUpdate', text_inicial, flags=re.IGNORECASE)
-        m = re.search(r"RecordUpdate\s*([\d]{1,2}\s*-\s*([A-Za-z]{3})\s*[\d]{1,2}\s*:\s*[\d]{2})", text_norm, re.IGNORECASE)
+        # ── RecordUpdate ─────────────────────────────────────────────────────
+        raw = await page_text(page)
+        norm_ru = re.sub(r"RecordUpdat\s*e", "RecordUpdate", raw, flags=re.IGNORECASE)
+        m = re.search(
+            r"RecordUpdate\s*([\d]{1,2}\s*-\s*([A-Za-z]{3})\s*[\d]{1,2}\s*:\s*[\d]{2})",
+            norm_ru, re.IGNORECASE,
+        )
+        if not m:
+            m = re.search(
+                r"([\d]{1,2}\s*-\s*([A-Za-z]{3})\s*[\d]{1,2}\s*:\s*[\d]{2})",
+                norm_ru, re.IGNORECASE,
+            )
         if m:
             result["record_update"] = m.group(1).strip()
             mes_actual = m.group(2).strip().capitalize()
             result["mes"] = mes_actual
+            logger.info(f"RecordUpdate: {result['record_update']}  |  Mes: {mes_actual}")
         else:
-            m = re.search(r"([\d]{1,2}\s*-\s*([A-Za-z]{3})\s*[\d]{1,2}\s*:\s*[\d]{2})", text_norm, re.IGNORECASE)
-            if m:
-                result["record_update"] = m.group(1).strip()
-                mes_actual = m.group(2).strip().capitalize()
-                result["mes"] = mes_actual
+            logger.warning("No se encontró RecordUpdate")
 
-        visitas = ["Visita 1", "Visita 2"]
-
-
-        # Filtros globales (Mes, Supervisor) se aplican una sola vez
-        print("Aplicando filtros globales...")
-        await click_filter_option(page, "Mes", mes_actual, deselect_all_first=True)
-        await page.wait_for_timeout(1500)
-        
-        await click_filter_option(page, "Supervisor", "YOHN", deselect_all_first=True)
+        # ── Filtros globales ─────────────────────────────────────────────────
+        logger.info(f"Aplicando filtro Mes = {mes_actual}")
+        await click_slicer_option(page, "Mes", mes_actual)
         await page.wait_for_timeout(1500)
 
-        for visita in visitas:
-            print(f"\n=== Procesando {visita} ===")
-            # Seleccionar solo esta visita en el slicer
-            filtrado = await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True)
-            print(f"  Filtro Nro. Visita aplicado: {filtrado}")
-            await page.wait_for_timeout(3000)  # Esperar render
-            
+        logger.info("Aplicando filtro Supervisor = YOHN")
+        await click_slicer_option(page, "Supervisor", "YOHN")
+        await page.wait_for_timeout(1500)
+
+        # ── Extraer scores por visita / tienda ───────────────────────────────
+        for visita in ["Visita 1", "Visita 2"]:
+            logger.info(f"\n{'='*40}\nProcesando {visita}")
+            await click_slicer_option(page, "Nro. Visita", visita)
+            await page.wait_for_timeout(2500)
+
             for tienda in TIENDAS:
-                print(f"\n  -> Buscando: {tienda} | {visita}")
+                logger.info(f"  Buscando {tienda}...")
                 score = "Sin visita"
                 try:
-                    # Hacer clic en la fila de la tienda en la tabla
-                    clicked = await find_and_click_store_row(page, tienda)
-                    
+                    clicked = await click_table_row(page, tienda)
                     if clicked:
-                        await page.wait_for_timeout(3000)  # Esperar que el panel se actualice
-                        page_raw = await get_page_text(page)
-                        norm_text = " ".join(page_raw.split())
-                        
-                        # Primeros 400 chars para debug en logs de Render
-                        # Buscar la sección "Auditorias - Items con nota - Sucess Rate"
-                        print(f"  [LOG] Texto (400 chars): {norm_text[:400]}")
-                        
-                        parsed = parse_success_rate_from_text(page_raw)
+                        await page.wait_for_timeout(2500)
+                        full_text = await page_text(page)
+                        # Log de diagnóstico: primeros 500 chars normalizados
+                        norm_dbg = " ".join(full_text.split())
+                        logger.info(f"[{tienda}|{visita}] Texto (500c): {norm_dbg[:500]}")
+                        parsed = parse_success_rate(full_text)
                         if parsed:
                             score = parsed
-                            print(f"  ✅ Score encontrado: {score}")
+                            logger.info(f"  ✅ {tienda} | {visita} = {score}")
                         else:
-                            print(f"  ⚠️ No se encontró score en el texto. Revisá los logs de Render.")
-                        
-                        # Deseleccionar la fila haciendo clic neutro en área vacía
+                            logger.warning(f"  ⚠️ No se encontró score para {tienda} | {visita}")
+                        # Deseleccionar fila
                         try:
-                            await page.mouse.click(500, 20)
-                            await page.wait_for_timeout(800)
+                            await page.mouse.click(960, 30)
+                            await page.wait_for_timeout(600)
                         except Exception:
                             pass
                     else:
-                        print(f"  ⚠️ No se pudo hacer clic en fila de {tienda}")
-                        
+                        logger.warning(f"  ⚠️ Fila no encontrada: {tienda}")
                 except Exception as e:
-                    print(f"  ❌ Error procesando {tienda}: {e}")
-                
-                print(f"  RESULTADO {tienda} | {visita}: {score}")
+                    logger.error(f"  ❌ Error en {tienda}: {e}", exc_info=True)
+
                 result["tiendas"][tienda][visita] = score
+                logger.info(f"  RESULTADO {tienda} | {visita}: {score}")
 
-
-        await context.close()
+        await ctx.close()
         await browser.close()
 
     return result
 
+# ─── Formateo de mensaje ──────────────────────────────────────────────────────
 def format_report_message(report: dict) -> str:
-    from datetime import datetime
     year = datetime.now().year
-
-    mes = report.get("mes", "?")
+    mes    = report.get("mes", "?")
     record = report.get("record_update", "?")
-    tiendas = report.get("tiendas", {})
-
-    lineas  = [
+    lines  = [
         f"✅ *Consulta Manual — {mes} {year}*",
         f"🕐 RecordUpdate: `{record}`",
         "",
     ]
-    for tienda, visitas in tiendas.items():
+    for tienda, visitas in report.get("tiendas", {}).items():
         emoji = TIENDA_EMOJIS.get(tienda, "🏪")
-        lineas.append(f"{emoji} *{tienda}*")
+        lines.append(f"{emoji} *{tienda}*")
         if visitas:
-            for nro_visita, nota in visitas.items():
-                lineas.append(f"   • {nro_visita}: `{nota}`")
+            for nro, nota in visitas.items():
+                lines.append(f"   • {nro}: `{nota}`")
         else:
-            lineas.append("   • Sin datos disponibles")
-        lineas.append("")
-    lineas.append(f"[Ver PowerBI]({URL})")
-    return "\n".join(lineas)
+            lines.append("   • Sin datos disponibles")
+        lines.append("")
+    lines.append(f"[Ver PowerBI]({URL})")
+    return "\n".join(lines)
 
+# ─── Extracción solo RecordUpdate (para el check_job) ────────────────────────
 async def extract_record_update():
-    """Para compatibilidad con el check_job (solo el RecordUpdate)."""
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-                headless=True
+                headless=True,
             )
             page = await browser.new_page()
             await page.goto(URL, wait_until="networkidle", timeout=60000)
             await page.wait_for_timeout(15000)
-
-            text_content = ""
-            for frame in page.frames:
-                try:
-                    text = await frame.inner_text("body", timeout=5000)
-                    text_content += text + "\n"
-                except Exception:
-                    pass
-
+            raw = await page_text(page)
             await browser.close()
-
-            text_norm = re.sub(r'RecordUpdat\s*e', 'RecordUpdate', text_content, flags=re.IGNORECASE)
-            match = re.search(
+            norm = re.sub(r"RecordUpdat\s*e", "RecordUpdate", raw, flags=re.IGNORECASE)
+            m = re.search(
                 r"RecordUpdate\s*([\d]{1,2}\s*-\s*[A-Za-z]{3}\s*\d{1,2}\s*:\s*\d{2})",
-                text_norm, re.IGNORECASE
+                norm, re.IGNORECASE,
             )
-            return match.group(1).strip() if match else None
+            return m.group(1).strip() if m else None
     except Exception as e:
-        print(f"Error extrayendo RecordUpdate: {e}")
+        logger.error(f"extract_record_update: {e}")
         return None
 
+# ─── Handlers Telegram ────────────────────────────────────────────────────────
 async def check_job(context: ContextTypes.DEFAULT_TYPE):
-    """Job periódico: revisa PowerBI y avisa si cambió con reporte detallado."""
     global LAST_RECORD, CHAT_ID
     if not CHAT_ID:
         return
-
-    current_record = await extract_record_update()
-
-    if current_record and current_record != LAST_RECORD:
-        LAST_RECORD = current_record
-        # Generar reporte detallado
+    current = await extract_record_update()
+    if current and current != LAST_RECORD:
+        LAST_RECORD = current
         report = await extract_full_report()
-        report["record_update"] = current_record
-        mensaje = format_report_message(report)
+        report["record_update"] = current
         await context.bot.send_message(
             chat_id=CHAT_ID,
-            text=mensaje,
-            parse_mode="Markdown"
+            text=format_report_message(report),
+            parse_mode="Markdown",
         )
     else:
-        print(f"Sin cambios. Valor actual: {current_record}")
+        logger.info(f"check_job: sin cambios ({current})")
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Inicia el bot y guarda el chat ID del usuario."""
     global CHAT_ID
     CHAT_ID = update.effective_chat.id
-
     if context.job_queue:
-        current_jobs = context.job_queue.get_jobs_by_name("powerbi_checker")
-        if not current_jobs:
-            context.job_queue.run_repeating(check_job, interval=3600, first=10, name="powerbi_checker")
-
+        if not context.job_queue.get_jobs_by_name("powerbi_checker"):
+            context.job_queue.run_repeating(
+                check_job, interval=3600, first=10, name="powerbi_checker"
+            )
     await update.message.reply_text(
-        "✅ *Bot iniciado correctamente!*\n\n"
-        "Revisaré tu PowerBI cada hora y te avisaré si cambia.\n\n"
-        "Comandos disponibles:\n"
-        "• /reporte → Ver notas por visita del mes actual\n"
-        "• /intervalo 60 → Revisar cada 60 minutos\n"
-        "• /intervalo 1 → Revisar cada 1 minuto",
-        parse_mode="Markdown"
+        "✅ *Bot iniciado!*\n\n"
+        "Revisaré tu PowerBI cada hora.\n\n"
+        "• /reporte → Ver notas del mes actual\n"
+        "• /intervalo 60 → Cambiar frecuencia",
+        parse_mode="Markdown",
     )
 
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Revisión inmediata con reporte detallado por visita y tienda."""
+    await update.message.reply_text("🔍 Consultando PowerBI... (1-2 minutos, por favor espera).")
     try:
-        await update.message.reply_text("🔍 Revisando PowerBI... (espera ~60 segundos).")
-
         report = await extract_full_report()
-
         if report.get("record_update"):
-            mensaje = format_report_message(report)
-            await update.message.reply_text(mensaje, parse_mode="Markdown")
+            await update.message.reply_text(format_report_message(report), parse_mode="Markdown")
         else:
             await update.message.reply_text(
-                "⚠️ No pude leer los datos del PowerBI en este momento. Puede ser un error de carga."
+                "⚠️ No pude leer el RecordUpdate. El dashboard puede estar cargando lento.\n"
+                "Intenta de nuevo en 1 minuto."
             )
     except Exception as e:
-        if 'logger' in globals():
-            logger.error(f"Error en /reporte: {e}", exc_info=True)
-        await update.message.reply_text(f"❌ Ocurrió un error interno: {str(e)}")
+        logger.error(f"report_command error: {e}", exc_info=True)
+        await update.message.reply_text(f"❌ Error interno:\n`{e}`", parse_mode="Markdown")
 
 async def set_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cambia el intervalo de revisión automática."""
     try:
         minutes = int(context.args[0])
         if minutes < 1:
-            await update.message.reply_text("⛔ El mínimo es 1 minuto.")
+            await update.message.reply_text("⛔ Mínimo 1 minuto.")
             return
-
         if context.job_queue:
-            current_jobs = context.job_queue.get_jobs_by_name("powerbi_checker")
-            for job in current_jobs:
+            for job in context.job_queue.get_jobs_by_name("powerbi_checker"):
                 job.schedule_removal()
-
-            context.job_queue.run_repeating(check_job, interval=minutes * 60, first=5, name="powerbi_checker")
-            await update.message.reply_text(f"⏱️ Listo! Revisaré PowerBI cada *{minutes} minuto(s)*.", parse_mode="Markdown")
+            context.job_queue.run_repeating(
+                check_job, interval=minutes * 60, first=5, name="powerbi_checker"
+            )
+            await update.message.reply_text(
+                f"⏱️ Revisaré cada *{minutes} min*.", parse_mode="Markdown"
+            )
         else:
-            await update.message.reply_text("❌ No está habilitado el planificador (job_queue).")
+            await update.message.reply_text("❌ job_queue no disponible.")
     except (IndexError, ValueError):
-        await update.message.reply_text("Uso: /intervalo <minutos>\nEjemplo: /intervalo 60")
+        await update.message.reply_text("Uso: /intervalo <minutos>  Ej: /intervalo 60")
 
-import logging
-
-# Habilitar logs detallados para ver errores, muy útil
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
+# ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     if not TOKEN:
-        print("ERROR: Falta el TELEGRAM_TOKEN.")
+        logger.error("TELEGRAM_TOKEN no definido.")
         return
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+    logger.info("Servidor web dummy iniciado.")
 
-    # Inicia el servidor web en un hilo paralelo (requerido por Render)
-    try:
-        threading.Thread(target=run_dummy_server, daemon=True).start()
-        print(f"Servidor web iniciado.")
-    except Exception as e:
-        logger.error(f"No se pudo iniciar servidor web: {e}")
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start",     start_command))
+    app.add_handler(CommandHandler("reporte",   report_command))
+    app.add_handler(CommandHandler("intervalo", set_interval))
 
-    application = Application.builder().token(TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("reporte", report_command))
-    application.add_handler(CommandHandler("intervalo", set_interval))
-
-    print("🤖 Bot de Telegram activo, esperando comandos...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    logger.info("🤖 Bot activo...")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
