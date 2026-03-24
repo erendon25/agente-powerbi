@@ -92,27 +92,28 @@ def parse_success_rate(text: str) -> str | None:
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     normalized = " ".join(text.split())
 
-    # DEBUG: mostrar contexto alrededor de "Success Rate"
-    sr_idx = normalized.lower().find("success rate")
-    if sr_idx >= 0:
-        context = normalized[max(0, sr_idx-50):min(len(normalized), sr_idx+250)]
-        print(f"    🔍 Contexto SR: ...{context}...")
+    # Estrategia 1: buscar "Success Rate" seguido de porcentaje (PRIORIDAD MÁXIMA)
+    # Buscar el patrón más específico: "Success Rate" + espacios/saltos + número + %
+    m = re.search(r"Suce?ss\s+Rat[e\s]*[\s\n]*(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            print(f"    ✅ Score (patrón SR directo): {val}%")
+            return str(val) + "%"
 
-    # Estrategia 1: buscar después de "Success Rate" o "Sucess Rate" (PRIORIDAD)
-    # Este es el patrón más confiable porque busca específicamente el donut
+    # Estrategia 2: buscar "Success Rate" con hasta 200 caracteres de distancia
     m = re.search(r"Suce?ss\s*Rat[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            print(f"    📊 Score (patrón SR): {val}%")
+            print(f"    ✅ Score (patrón SR flexible): {val}%")
             return str(val) + "%"
 
-    # Estrategia 2: buscar línea que sea solo un porcentaje (XX% o XX %)
-    # PowerBI renderiza el valor de la métrica en una línea propia
-    # Pero solo si no encontramos Success Rate
+    # Estrategia 3: buscar línea que sea solo un porcentaje (XX% o XX %)
+    # Pero EXCLUIR líneas que contengan palabras clave de otros gráficos
     valid_pcts = []
     for line in lines[-80:]:
-        if 'ampliado' in line.lower() or 'microsoft' in line.lower():
+        if any(kw in line.lower() for kw in ['ampliado', 'microsoft', 'top places', 'lugar', 'growth']):
             continue
         m = re.fullmatch(r"(\d{1,3})\s*%", line)
         if m:
@@ -121,31 +122,31 @@ def parse_success_rate(text: str) -> str | None:
                 valid_pcts.append(val)
     
     if valid_pcts:
-        print(f"    📊 Score (línea aislada): {valid_pcts[-1]}% | Todas: {valid_pcts}")
+        print(f"    ✅ Score (línea aislada): {valid_pcts[-1]}%")
         return f"{valid_pcts[-1]}%"
 
-    # Estrategia 3: buscar en sección Resumen General
+    # Estrategia 4: buscar en sección Resumen General
     m = re.search(r"Resumen General[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            print(f"    📊 Score (patrón Resumen): {val}%")
+            print(f"    ✅ Score (patrón Resumen): {val}%")
             return str(val) + "%"
 
-    # Estrategia 4: buscar el número inmediatamente antes o después de "Nota"
+    # Estrategia 5: buscar el número inmediatamente antes o después de "Nota"
     m = re.search(r"Nota\D{0,30}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            print(f"    📊 Score (patrón Nota): {val}%")
+            print(f"    ✅ Score (patrón Nota): {val}%")
             return str(val) + "%"
 
-    # Estrategia 5: buscar "Items con nota" seguido de un porcentaje
+    # Estrategia 6: buscar "Items con nota" seguido de un porcentaje
     m = re.search(r"Items\s+con\s+nota[^%]{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            print(f"    📊 Score (patrón Items): {val}%")
+            print(f"    ✅ Score (patrón Items): {val}%")
             return str(val) + "%"
 
     print(f"    ❌ No se encontró porcentaje válido")

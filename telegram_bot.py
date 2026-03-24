@@ -159,21 +159,28 @@ def parse_success_rate(text: str):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     normalized = " ".join(text.split())
 
-    # Estrategia 1: buscar después de "Success Rate" o "Sucess Rate" (PRIORIDAD)
-    # Este es el patrón más confiable porque busca específicamente el donut
+    # Estrategia 1: buscar "Success Rate" seguido de porcentaje (PRIORIDAD MÁXIMA)
+    # Buscar el patrón más específico: "Success Rate" + espacios/saltos + número + %
+    m = re.search(r"Suce?ss\s+Rat[e\s]*[\s\n]*(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            logger.info(f"✅ parse_success_rate → {val}% (patrón SR directo)")
+            return str(val) + "%"
+
+    # Estrategia 2: buscar "Success Rate" con hasta 200 caracteres de distancia
     m = re.search(r"Suce?ss\s*Rat[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            logger.info(f"parse_success_rate → {val}% (patrón SR)")
+            logger.info(f"✅ parse_success_rate → {val}% (patrón SR flexible)")
             return str(val) + "%"
 
-    # Estrategia 2: buscar línea que sea solo un porcentaje (XX% o XX %)
-    # PowerBI renderiza el valor de la métrica en una línea propia
-    # Pero solo si no encontramos Success Rate
+    # Estrategia 3: buscar línea que sea solo un porcentaje (XX% o XX %)
+    # Pero EXCLUIR líneas que contengan palabras clave de otros gráficos
     valid_pcts = []
     for line in lines[-80:]:
-        if 'ampliado' in line.lower() or 'microsoft' in line.lower():
+        if any(kw in line.lower() for kw in ['ampliado', 'microsoft', 'top places', 'lugar', 'growth']):
             continue
         m = re.fullmatch(r"(\d{1,3})\s*%", line)
         if m:
@@ -182,34 +189,34 @@ def parse_success_rate(text: str):
                 valid_pcts.append(val)
     
     if valid_pcts:
-        logger.info(f"parse_success_rate → {valid_pcts[-1]}% (línea aislada)")
+        logger.info(f"✅ parse_success_rate → {valid_pcts[-1]}% (línea aislada)")
         return f"{valid_pcts[-1]}%"
 
-    # Estrategia 3: buscar en sección Resumen General
+    # Estrategia 4: buscar en sección Resumen General
     m = re.search(r"Resumen General[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            logger.info(f"parse_success_rate → {val}% (patrón Resumen)")
+            logger.info(f"✅ parse_success_rate → {val}% (patrón Resumen)")
             return str(val) + "%"
 
-    # Estrategia 4: buscar el número inmediatamente antes o después de "Nota"
+    # Estrategia 5: buscar el número inmediatamente antes o después de "Nota"
     m = re.search(r"Nota\D{0,30}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            logger.info(f"parse_success_rate → {val}% (patrón Nota)")
+            logger.info(f"✅ parse_success_rate → {val}% (patrón Nota)")
             return str(val) + "%"
 
-    # Estrategia 5: buscar "Items con nota" seguido de un porcentaje
+    # Estrategia 6: buscar "Items con nota" seguido de un porcentaje
     m = re.search(r"Items\s+con\s+nota[^%]{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            logger.info(f"parse_success_rate → {val}% (patrón Items)")
+            logger.info(f"✅ parse_success_rate → {val}% (patrón Items)")
             return str(val) + "%"
                 
-    logger.warning("No se encontró Success Rate válido en el DOM.")
+    logger.warning("❌ No se encontró Success Rate válido en el DOM.")
     return None
 
 # ─── Extracción principal ─────────────────────────────────────────────────────
