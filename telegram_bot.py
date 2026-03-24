@@ -111,41 +111,44 @@ async def click_slicer_option(page, label: str, option: str):
                 items = frame.locator(".slicerItemContainer")
                 cnt = await items.count()
                 for i in range(cnt):
-                    item = items.nth(i)
-                    t = await item.inner_text()
-                    if select_all_text.lower() in t.lower() and await item.is_visible():
-                        await item.click(force=True)
-                        await page.wait_for_timeout(500)
-                        await item.click(force=True)  # segunda vez para deseleccionar todo
-                        await page.wait_for_timeout(500)
-                        break
+                    try:
+                        rt = await items.nth(i).inner_text(timeout=400)
+                        if select_all_text.lower() in rt.lower():
+                            await items.nth(i).click(force=True)
+                            await page.wait_for_timeout(800)
+                            break
+                    except Exception:
+                        continue
 
-            # Seleccionar la opción deseada
+            # Escribir en buscador
+            search = container.locator("input.searchInput")
+            if await search.count() > 0:
+                await search.first.fill(option)
+                await page.wait_for_timeout(800)
+
+            # Seleccionar la opción
             items = frame.locator(".slicerItemContainer")
             cnt = await items.count()
             for i in range(cnt):
-                item = items.nth(i)
-                t = await item.inner_text()
-                if option.lower() in t.lower() and await item.is_visible():
-                    await item.click(force=True)
-                    await page.wait_for_timeout(500)
-                    logger.info(f"Slicer '{label}' → '{option}' ✅")
-                    # Cerrar dropdown
-                    if await box.count() > 0:
-                        await box.first.click(force=True)
-                    else:
-                        await container.click(force=True)
-                    await page.wait_for_timeout(800)
-                    return True
-
-            # Cerrar aunque no se encontró
-            if await box.count() > 0:
-                await box.first.click(force=True)
-            else:
-                await container.click(force=True)
-            await page.wait_for_timeout(500)
+                try:
+                    rt = await items.nth(i).inner_text(timeout=400)
+                    if option.lower() in rt.lower() and "seleccionar todo" not in rt.lower() and "select all" not in rt.lower():
+                        await items.nth(i).click(force=True)
+                        await page.wait_for_timeout(1000)
+                        
+                        # Cerrar slicer haciendo click fuera
+                        try:
+                            await page.mouse.click(10, 10)
+                            await page.wait_for_timeout(500)
+                        except Exception:
+                            pass
+                        return True
+                except Exception:
+                    pass
         except Exception as e:
-            logger.warning(f"click_slicer_option('{label}','{option}'): {e}")
+            logger.warning(f"Error procesando frame para slicer '{label}': {e}")
+            pass
+    
     logger.warning(f"Slicer '{label}' → '{option}' ❌ no encontrado")
     return False
 
@@ -317,50 +320,37 @@ async def extract_full_report() -> dict:
         await page.wait_for_timeout(1500)
 
         # ── Extraer scores por visita / tienda ───────────────────────────────
-        # ESTRATEGIA: Obtener el texto general de la página ANTES de hacer clicks en la tabla,
-        # para capturar los valores de Top Places (que se borran al hacer click)
+        # ESTRATEGIA: Aplicar filtro en el Slicer "Tiendas" para actualizar el donut.
         for visita in ["Visita 1", "Visita 2"]:
             logger.info(f"\n{'='*40}\nProcesando {visita}")
             await click_slicer_option(page, "Nro. Visita", visita)
             await page.wait_for_timeout(3500)
             
-            # Obtener texto de la vista general (donde los Top Places están visibles)
-            full_text_general = await page_text(page)
-
             for tienda in TIENDAS:
-                logger.info(f"  Buscando {tienda} en vista general...")
+                logger.info(f"  Filtrando {tienda} en Slicer...")
+                score = "Sin visita"
                 
-                # Intentar parsear de la vista general
-                parsed = parse_success_rate(full_text_general, tienda=tienda)
-                
-                if parsed:
-                    score = parsed
-                    logger.info(f"  ✅ {tienda} | {visita} = {score}")
-                else:
-                    score = "Sin visita"
-                    logger.warning(f"  ⚠️ No se encontró score para {tienda} en vista general, intentando click tabla...")
-                    # Fallback: intentar hacer click en la tabla si no se encontró en Top Places
-                    try:
-                        clicked = await click_table_row(page, tienda)
-                        if clicked:
-                            await page.wait_for_timeout(3500)
-                            full_text_detail = await page_text(page)
-                            
-                            parsed_detail = parse_success_rate(full_text_detail, tienda=tienda)
-                            if parsed_detail:
-                                score = parsed_detail
-                                logger.info(f"  ✅ {tienda} | {visita} = {score} (Click en tabla)")
-                            
-                            # Deseleccionar fila
-                            try:
-                                await page.mouse.click(960, 30)
-                                await page.wait_for_timeout(800)
-                            except Exception:
-                                pass
+                try:
+                    slicer_applied = await click_slicer_option(page, "Tiendas", tienda)
+                    if slicer_applied:
+                        await page.wait_for_timeout(3500)
+                        
+                        full_text = await page_text(page)
+                        parsed = parse_success_rate(full_text)
+                        
+                        if parsed:
+                            score = parsed
+                            logger.info(f"  ✅ {tienda} | {visita} = {score}")
                         else:
-                            logger.warning(f"  ⚠️ Fila no encontrada: {tienda}")
-                    except Exception as e:
-                        logger.error(f"  ❌ Error en {tienda}: {e}", exc_info=True)
+                            logger.warning(f"  ⚠️ No se encontró score para {tienda} | {visita}")
+                        
+                        # Limpiar filtro de tienda haciendo click en un espacio en blanco para deseleccionar
+                        # o el mismo slicer se limpia con la lógica de click_slicer_option
+                    else:
+                        logger.warning(f"  ⚠️ No se pudo aplicar el slicer para: {tienda}")
+                        
+                except Exception as e:
+                    logger.error(f"  ❌ Error en {tienda}: {e}", exc_info=True)
 
                 result["tiendas"][tienda][visita] = score
                 logger.info(f"  RESULTADO {tienda} | {visita}: {score}")
