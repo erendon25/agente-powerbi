@@ -305,17 +305,16 @@ async def extract_full_report() -> dict:
                         await page.wait_for_timeout(2500)
                         full_text = await page_text(page)
                         
-                        # DEBUG: guardar el texto para diagnosticar
-                        debug_file = Path(__file__).parent / f"debug_{tienda.replace(' ', '_')}_{visita.replace(' ', '_')}.txt"
-                        try:
-                            debug_file.write_text(full_text, encoding="utf-8")
-                            logger.info(f"💾 Debug guardado en: {debug_file}")
-                        except Exception as e:
-                            logger.error(f"❌ Error guardando debug: {e}")
+                        # DEBUG: mostrar contexto completo en logs
+                        logger.info(f"\n{'='*80}")
+                        logger.info(f"DEBUG [{tienda}|{visita}] - TEXTO COMPLETO:")
+                        logger.info(f"{'='*80}")
+                        logger.info(full_text[:3000])  # Primeros 3000 caracteres
+                        logger.info(f"{'='*80}\n")
                         
                         # Log de diagnóstico: primeros 500 chars normalizados
                         norm_dbg = " ".join(full_text.split())
-                        logger.info(f"[{tienda}|{visita}] Texto (500c): {norm_dbg[:500]}")
+                        logger.info(f"[{tienda}|{visita}] Texto normalizado (500c): {norm_dbg[:500]}")
                         parsed = parse_success_rate(full_text)
                         if parsed:
                             score = parsed
