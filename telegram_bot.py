@@ -5,6 +5,7 @@ import re
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 from playwright.async_api import async_playwright
 from telegram import Update
@@ -241,24 +242,24 @@ async def extract_full_report() -> dict:
         page = await ctx.new_page()
 
         # ── Cargar página ────────────────────────────────────────────────────
-        logger.info("Cargando PowerBI...")
+        logger.info("⏳ Cargando PowerBI (máx 60s)...")
         try:
-            await page.goto(URL, wait_until="networkidle", timeout=90000)
-        except Exception:
-            await page.goto(URL, wait_until="domcontentloaded", timeout=90000)
+            await page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+        except Exception as e:
+            logger.warning(f"⚠️ Timeout en carga: {e}, continuando...")
 
         # Aceptar cookies si aparecen
         for sel in ["button:has-text('Accept')", "button:has-text('Aceptar')", "button:has-text('OK')"]:
             try:
                 b = page.locator(sel).first
-                if await b.is_visible(timeout=1500):
+                if await b.is_visible(timeout=1000):
                     await b.click()
-                    await page.wait_for_timeout(800)
+                    await page.wait_for_timeout(500)
             except Exception:
                 pass
 
-        logger.info("Esperando render inicial (12s)...")
-        await page.wait_for_timeout(12000)
+        logger.info("⏳ Esperando render (8s)...")
+        await page.wait_for_timeout(8000)
 
         # ── RecordUpdate ─────────────────────────────────────────────────────
         raw = await page_text(page)
@@ -305,10 +306,12 @@ async def extract_full_report() -> dict:
                         full_text = await page_text(page)
                         
                         # DEBUG: guardar el texto para diagnosticar
-                        debug_file = f"debug_{tienda.replace(' ', '_')}_{visita.replace(' ', '_')}.txt"
-                        with open(debug_file, "w", encoding="utf-8") as f:
-                            f.write(full_text)
-                        logger.info(f"💾 Debug guardado en: {debug_file}")
+                        debug_file = Path(__file__).parent / f"debug_{tienda.replace(' ', '_')}_{visita.replace(' ', '_')}.txt"
+                        try:
+                            debug_file.write_text(full_text, encoding="utf-8")
+                            logger.info(f"💾 Debug guardado en: {debug_file}")
+                        except Exception as e:
+                            logger.error(f"❌ Error guardando debug: {e}")
                         
                         # Log de diagnóstico: primeros 500 chars normalizados
                         norm_dbg = " ".join(full_text.split())
@@ -418,9 +421,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔍 Consultando PowerBI... (1-2 minutos, por favor espera).")
+    await update.message.reply_text("🔍 Consultando PowerBI... (máx 3 minutos, por favor espera).")
     try:
-        report = await extract_full_report()
+        # Timeout de 3 minutos para toda la operación
+        report = await asyncio.wait_for(extract_full_report(), timeout=180)
         if report.get("record_update"):
             await update.message.reply_text(format_report_message(report), parse_mode="Markdown")
         else:
@@ -428,6 +432,12 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "⚠️ No pude leer el RecordUpdate. El dashboard puede estar cargando lento.\n"
                 "Intenta de nuevo en 1 minuto."
             )
+    except asyncio.TimeoutError:
+        logger.error("report_command: Timeout después de 3 minutos")
+        await update.message.reply_text(
+            "⏱️ Timeout: PowerBI tardó demasiado en cargar.\n"
+            "Intenta de nuevo en 1 minuto."
+        )
     except Exception as e:
         logger.error(f"report_command error: {e}", exc_info=True)
         await update.message.reply_text(f"❌ Error interno:\n`{e}`", parse_mode="Markdown")
