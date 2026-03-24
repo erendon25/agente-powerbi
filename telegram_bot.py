@@ -180,30 +180,53 @@ def parse_success_rate(text: str):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     normalized = " ".join(lines)
 
-    # Estrategia 1: Localizar "Sucess Rate" en el array de líneas y buscar
-    # el primer porcentaje en las 50 líneas SIGUIENTES.
-    # Soporta texto unido "81 %" y texto SVG dividido "81" + "%" en líneas separadas.
+    # DEBUG: Localizar "Sucess Rate" y mostrar contexto de ±20 líneas
     sr_idx = None
     for i, line in enumerate(lines):
         if re.search(r"Suce?ss\s*Rate", line, re.IGNORECASE):
             sr_idx = i
+            logger.info(f"🔍 'Sucess Rate' encontrado en línea {i}")
+            start = max(0, i - 20)
+            end = min(len(lines), i + 21)
+            logger.info(f"📋 Contexto (líneas {start}-{end}):")
+            for idx in range(start, end):
+                prefix = ">>> " if idx == i else "    "
+                logger.info(f"{prefix}{idx}: {lines[idx][:80]}")
             break
 
     if sr_idx is not None:
+        # Buscar ANTES de "Sucess Rate" (primeras 20 líneas previas)
+        before = lines[max(0, sr_idx - 20): sr_idx]
+        for j in range(len(before) - 1, -1, -1):  # Iterar en reversa
+            bline = before[j]
+            m = re.fullmatch(r"(\d{1,3})\s*%", bline)
+            if m:
+                val = int(m.group(1))
+                if 0 < val <= 100:
+                    logger.info(f"✅ parse_success_rate → {val}% (ANTES de SR, línea {sr_idx - (len(before) - j)})")
+                    return str(val) + "%"
+            # Caso SVG dividido antes
+            if j > 0 and re.fullmatch(r"%", bline) and re.fullmatch(r"\d{1,3}", before[j - 1]):
+                val = int(before[j - 1])
+                if 0 < val <= 100:
+                    logger.info(f"✅ parse_success_rate → {val}% (ANTES de SR, SVG split)")
+                    return str(val) + "%"
+        
+        # Buscar DESPUÉS de "Sucess Rate"
         after = lines[sr_idx + 1: sr_idx + 51]
         for j, aline in enumerate(after):
             m = re.fullmatch(r"(\d{1,3})\s*%", aline)
             if m:
                 val = int(m.group(1))
                 if 0 < val <= 100:
-                    logger.info(f"✅ parse_success_rate → {val}% (después de SR, línea)")
+                    logger.info(f"✅ parse_success_rate → {val}% (DESPUÉS de SR, línea {sr_idx + 1 + j})")
                     return str(val) + "%"
-            # Caso SVG dividido: número solo + "%" en la línea siguiente
+            # Caso SVG dividido después
             if re.fullmatch(r"\d{1,3}", aline) and j + 1 < len(after):
                 if re.fullmatch(r"%", after[j + 1]):
                     val = int(aline)
                     if 0 < val <= 100:
-                        logger.info(f"✅ parse_success_rate → {val}% (después de SR, SVG split)")
+                        logger.info(f"✅ parse_success_rate → {val}% (DESPUÉS de SR, SVG split)")
                         return str(val) + "%"
 
     # Estrategia 2: regex sobre texto normalizado con ventana amplia
@@ -213,25 +236,6 @@ def parse_success_rate(text: str):
         if 0 < val <= 100:
             logger.info(f"✅ parse_success_rate → {val}% (regex SR amplio)")
             return str(val) + "%"
-
-    # Estrategia 3: buscar línea aislada con porcentaje en TODAS las líneas
-    # (no solo last 80), excluyendo métricas irrelevantes
-    excl = ['ampliado', 'microsoft', 'top places', 'lugar', 'growth',
-            'experiencia', 'rapidez', 'frescura', 'barra de datos',
-            'calidad', 'apariencia', 'ambiente', 'criterio']
-    valid_pcts = []
-    for line in lines:
-        if any(kw in line.lower() for kw in excl):
-            continue
-        m = re.fullmatch(r"(\d{1,3})\s*%", line)
-        if m:
-            val = int(m.group(1))
-            if 0 < val <= 100:
-                valid_pcts.append(val)
-
-    if valid_pcts:
-        logger.info(f"✅ parse_success_rate → {valid_pcts[-1]}% (línea aislada fallback)")
-        return f"{valid_pcts[-1]}%"
 
     logger.warning("❌ No se encontró Success Rate válido en el DOM.")
     return None
