@@ -159,21 +159,21 @@ def parse_success_rate(text: str):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     normalized = " ".join(text.split())
 
-    # Estrategia 1: buscar "Sucess Rate" ... "Tiendas" ... y extraer el porcentaje entre ellos
-    # Este patrón es más específico y evita capturar porcentajes de la tabla
-    m = re.search(r"Sucess\s+Rate[^T]*?Tiendas[^%]{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    # Estrategia 1: buscar porcentaje ANTES de "Sucess Rate" (el donut muestra el valor arriba del label)
+    # Buscar: (porcentaje) ... Sucess Rate
+    m = re.search(r"(\d{1,3})\s*%[^S]{0,150}?Sucess\s+Rate", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            logger.info(f"✅ parse_success_rate → {val}% (patrón SR-Tiendas)")
+            logger.info(f"✅ parse_success_rate → {val}% (patrón % antes de SR)")
             return str(val) + "%"
 
-    # Estrategia 2: buscar "Success Rate" ... "Tiendas" ... y extraer el porcentaje
-    m = re.search(r"Success\s+Rate[^T]*?Tiendas[^%]{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    # Estrategia 2: buscar porcentaje ANTES de "Success Rate" (con 'c')
+    m = re.search(r"(\d{1,3})\s*%[^S]{0,150}?Success\s+Rate", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            logger.info(f"✅ parse_success_rate → {val}% (patrón Success-Tiendas)")
+            logger.info(f"✅ parse_success_rate → {val}% (patrón % antes de Success)")
             return str(val) + "%"
 
     # Estrategia 3: buscar línea que sea solo un porcentaje (XX% o XX %)
