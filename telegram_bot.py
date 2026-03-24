@@ -167,69 +167,62 @@ async def click_table_row(page, tienda: str) -> bool:
 
 def parse_success_rate(text: str):
     """Extrae el porcentaje del 'Sucess Rate' del texto completo de la página."""
-    
     lines = [line.strip() for line in text.split("\n") if line.strip()]
-    normalized = " ".join(text.split())
+    normalized = " ".join(lines)
 
-    # Estrategia 1: buscar porcentaje ANTES de "Sucess Rate" (el donut muestra el valor arriba del label)
-    # Buscar: (porcentaje) ... Sucess Rate
-    m = re.search(r"(\d{1,3})\s*%[^S]{0,150}?Sucess\s+Rate", normalized, re.IGNORECASE)
+    # Estrategia 1: Localizar "Sucess Rate" en el array de líneas y buscar
+    # el primer porcentaje en las 50 líneas SIGUIENTES.
+    # Soporta texto unido "81 %" y texto SVG dividido "81" + "%" en líneas separadas.
+    sr_idx = None
+    for i, line in enumerate(lines):
+        if re.search(r"Suce?ss\s*Rate", line, re.IGNORECASE):
+            sr_idx = i
+            break
+
+    if sr_idx is not None:
+        after = lines[sr_idx + 1: sr_idx + 51]
+        for j, aline in enumerate(after):
+            m = re.fullmatch(r"(\d{1,3})\s*%", aline)
+            if m:
+                val = int(m.group(1))
+                if 0 < val <= 100:
+                    logger.info(f"✅ parse_success_rate → {val}% (después de SR, línea)")
+                    return str(val) + "%"
+            # Caso SVG dividido: número solo + "%" en la línea siguiente
+            if re.fullmatch(r"\d{1,3}", aline) and j + 1 < len(after):
+                if re.fullmatch(r"%", after[j + 1]):
+                    val = int(aline)
+                    if 0 < val <= 100:
+                        logger.info(f"✅ parse_success_rate → {val}% (después de SR, SVG split)")
+                        return str(val) + "%"
+
+    # Estrategia 2: regex sobre texto normalizado con ventana amplia
+    m = re.search(r"Suce?ss\s*Rate.{0,600}?(\d{1,3})\s*%", normalized, re.IGNORECASE | re.DOTALL)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            logger.info(f"✅ parse_success_rate → {val}% (patrón % antes de SR)")
+            logger.info(f"✅ parse_success_rate → {val}% (regex SR amplio)")
             return str(val) + "%"
 
-    # Estrategia 2: buscar porcentaje ANTES de "Success Rate" (con 'c')
-    m = re.search(r"(\d{1,3})\s*%[^S]{0,150}?Success\s+Rate", normalized, re.IGNORECASE)
-    if m:
-        val = int(m.group(1))
-        if 0 < val <= 100:
-            logger.info(f"✅ parse_success_rate → {val}% (patrón % antes de Success)")
-            return str(val) + "%"
-
-    # Estrategia 3: buscar línea que sea solo un porcentaje (XX% o XX %)
-    # Pero EXCLUIR líneas que contengan palabras clave de otros gráficos
-    # IMPORTANTE: Excluir también "EXPERIENCIA", "RAPIDEZ", "FRESCURA" que son métricas de tabla
+    # Estrategia 3: buscar línea aislada con porcentaje en TODAS las líneas
+    # (no solo last 80), excluyendo métricas irrelevantes
+    excl = ['ampliado', 'microsoft', 'top places', 'lugar', 'growth',
+            'experiencia', 'rapidez', 'frescura', 'barra de datos',
+            'calidad', 'apariencia', 'ambiente', 'criterio']
     valid_pcts = []
-    for line in lines[-80:]:
-        if any(kw in line.lower() for kw in ['ampliado', 'microsoft', 'top places', 'lugar', 'growth', 
-                                               'experiencia', 'rapidez', 'frescura', 'barra de datos', 'calidad', 'apariencia', 'ambiente']):
+    for line in lines:
+        if any(kw in line.lower() for kw in excl):
             continue
         m = re.fullmatch(r"(\d{1,3})\s*%", line)
         if m:
             val = int(m.group(1))
             if 0 < val <= 100:
                 valid_pcts.append(val)
-    
+
     if valid_pcts:
-        logger.info(f"✅ parse_success_rate → {valid_pcts[-1]}% (línea aislada)")
+        logger.info(f"✅ parse_success_rate → {valid_pcts[-1]}% (línea aislada fallback)")
         return f"{valid_pcts[-1]}%"
 
-    # Estrategia 4: buscar en sección Resumen General
-    m = re.search(r"Resumen General[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
-    if m:
-        val = int(m.group(1))
-        if 0 < val <= 100:
-            logger.info(f"✅ parse_success_rate → {val}% (patrón Resumen)")
-            return str(val) + "%"
-
-    # Estrategia 5: buscar el número inmediatamente antes o después de "Nota"
-    m = re.search(r"Nota\D{0,30}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
-    if m:
-        val = int(m.group(1))
-        if 0 < val <= 100:
-            logger.info(f"✅ parse_success_rate → {val}% (patrón Nota)")
-            return str(val) + "%"
-
-    # Estrategia 6: buscar "Items con nota" seguido de un porcentaje
-    m = re.search(r"Items\s+con\s+nota[^%]{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
-    if m:
-        val = int(m.group(1))
-        if 0 < val <= 100:
-            logger.info(f"✅ parse_success_rate → {val}% (patrón Items)")
-            return str(val) + "%"
-                
     logger.warning("❌ No se encontró Success Rate válido en el DOM.")
     return None
 
