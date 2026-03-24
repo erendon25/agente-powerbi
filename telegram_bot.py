@@ -315,44 +315,60 @@ async def extract_full_report() -> dict:
         await page.wait_for_timeout(1500)
 
         # ── Extraer scores por visita / tienda ───────────────────────────────
+        # ESTRATEGIA: usar slicer de Tienda en lugar de click en tabla para mantener vista principal
         for visita in ["Visita 1", "Visita 2"]:
             logger.info(f"\n{'='*40}\nProcesando {visita}")
             await click_slicer_option(page, "Nro. Visita", visita)
             await page.wait_for_timeout(2500)
 
             for tienda in TIENDAS:
-                logger.info(f"  Buscando {tienda}...")
+                logger.info(f"  Filtrando {tienda}...")
                 score = "Sin visita"
                 try:
-                    clicked = await click_table_row(page, tienda)
-                    if clicked:
-                        await page.wait_for_timeout(2500)
-                        full_text = await page_text(page)
-                        
-                        # DEBUG: mostrar contexto completo en logs
-                        logger.info(f"\n{'='*80}")
-                        logger.info(f"DEBUG [{tienda}|{visita}] - TEXTO COMPLETO:")
-                        logger.info(f"{'='*80}")
-                        logger.info(full_text[:3000])  # Primeros 3000 caracteres
-                        logger.info(f"{'='*80}\n")
-                        
-                        # Log de diagnóstico: primeros 500 chars normalizados
-                        norm_dbg = " ".join(full_text.split())
-                        logger.info(f"[{tienda}|{visita}] Texto normalizado (500c): {norm_dbg[:500]}")
-                        parsed = parse_success_rate(full_text)
-                        if parsed:
-                            score = parsed
-                            logger.info(f"  ✅ {tienda} | {visita} = {score}")
-                        else:
-                            logger.warning(f"  ⚠️ No se encontró score para {tienda} | {visita}")
-                        # Deseleccionar fila
+                    # Intentar filtrar por slicer de Tienda (puede llamarse "Tienda", "Tiendas", etc.)
+                    slicer_applied = False
+                    for slicer_name in ["Tienda", "Tiendas", "Store"]:
+                        try:
+                            await click_slicer_option(page, slicer_name, tienda)
+                            slicer_applied = True
+                            logger.info(f"  ✅ Slicer '{slicer_name}' aplicado para {tienda}")
+                            break
+                        except Exception:
+                            continue
+                    
+                    if not slicer_applied:
+                        logger.warning(f"  ⚠️ No se encontró slicer de Tienda, intentando click en tabla...")
+                        clicked = await click_table_row(page, tienda)
+                        if not clicked:
+                            logger.warning(f"  ⚠️ Fila no encontrada: {tienda}")
+                            result["tiendas"][tienda][visita] = score
+                            continue
+                    
+                    await page.wait_for_timeout(2500)
+                    full_text = await page_text(page)
+                    
+                    # DEBUG: mostrar contexto completo en logs
+                    logger.info(f"\n{'='*80}")
+                    logger.info(f"DEBUG [{tienda}|{visita}] - TEXTO COMPLETO:")
+                    logger.info(f"{'='*80}")
+                    logger.info(full_text[:3000])  # Primeros 3000 caracteres
+                    logger.info(f"{'='*80}\n")
+                    
+                    parsed = parse_success_rate(full_text)
+                    if parsed:
+                        score = parsed
+                        logger.info(f"  ✅ {tienda} | {visita} = {score}")
+                    else:
+                        logger.warning(f"  ⚠️ No se encontró score para {tienda} | {visita}")
+                    
+                    # Limpiar filtro de tienda si se aplicó slicer
+                    if slicer_applied:
                         try:
                             await page.mouse.click(960, 30)
                             await page.wait_for_timeout(600)
                         except Exception:
                             pass
-                    else:
-                        logger.warning(f"  ⚠️ Fila no encontrada: {tienda}")
+                            
                 except Exception as e:
                     logger.error(f"  ❌ Error en {tienda}: {e}", exc_info=True)
 
