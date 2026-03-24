@@ -160,16 +160,21 @@ def parse_success_rate(text: str):
     normalized = " ".join(text.split())
 
     # Estrategia 1: buscar "Sucess Rate" (sin 'c') seguido de porcentaje (PRIORIDAD MÁXIMA)
-    # PowerBI a veces renderiza "Sucess" sin la 'c'
-    m = re.search(r"Sucess\s+Rate[^%]{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
-    if m:
-        val = int(m.group(1))
-        if 0 < val <= 100:
-            logger.info(f"✅ parse_success_rate → {val}% (patrón Sucess Rate)")
-            return str(val) + "%"
+    # Buscar DESPUÉS de "Sucess Rate", excluyendo lo que viene antes
+    # Patrón: "Sucess Rate" ... (ignorar todo hasta después de "Tiendas") ... número + %
+    sr_idx = normalized.lower().find("sucess rate")
+    if sr_idx >= 0:
+        # Buscar desde "Sucess Rate" hacia adelante
+        after_sr = normalized[sr_idx:sr_idx+500]
+        m = re.search(r"Sucess\s+Rate[^%]{0,150}?(\d{1,3})\s*%", after_sr, re.IGNORECASE)
+        if m:
+            val = int(m.group(1))
+            if 0 < val <= 100:
+                logger.info(f"✅ parse_success_rate → {val}% (patrón Sucess Rate directo)")
+                return str(val) + "%"
 
     # Estrategia 2: buscar "Success Rate" (con 'c') seguido de porcentaje
-    m = re.search(r"Success\s+Rate[^%]{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    m = re.search(r"Success\s+Rate[^%]{0,150}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
@@ -470,6 +475,39 @@ async def set_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("Uso: /intervalo <minutos>  Ej: /intervalo 60")
 
+async def tienda_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Permite seleccionar qué tienda consultar."""
+    if not context.args:
+        await update.message.reply_text(
+            "🏪 *Tiendas disponibles:*\n\n"
+            "• /tienda PORONGOCHE\n"
+            "• /tienda MALL\n\n"
+            "Ejemplo: `/tienda PORONGOCHE`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    tienda_seleccionada = " ".join(context.args).upper()
+    tiendas_validas = ["PORONGOCHE", "MALL PORONGOCHE", "MALL"]
+    
+    if tienda_seleccionada == "MALL":
+        tienda_seleccionada = "MALL PORONGOCHE"
+    
+    if tienda_seleccionada not in tiendas_validas:
+        await update.message.reply_text(
+            f"❌ Tienda no válida: {tienda_seleccionada}\n\n"
+            "Usa: /tienda PORONGOCHE o /tienda MALL",
+            parse_mode="Markdown"
+        )
+        return
+    
+    context.user_data['tienda_seleccionada'] = tienda_seleccionada
+    await update.message.reply_text(
+        f"✅ Tienda seleccionada: *{tienda_seleccionada}*\n\n"
+        "Usa /reporte para ver la nota de esta tienda.",
+        parse_mode="Markdown"
+    )
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     if not TOKEN:
@@ -482,6 +520,7 @@ def main():
     app.add_handler(CommandHandler("start",     start_command))
     app.add_handler(CommandHandler("reporte",   report_command))
     app.add_handler(CommandHandler("intervalo", set_interval))
+    app.add_handler(CommandHandler("tienda",    tienda_command))
 
     logger.info("🤖 Bot activo...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
