@@ -159,21 +159,21 @@ def parse_success_rate(text: str):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     normalized = " ".join(text.split())
 
-    # Estrategia 1: buscar "Success Rate" seguido de porcentaje (PRIORIDAD MÁXIMA)
-    # Buscar el patrón más específico: "Success Rate" + espacios/saltos + número + %
-    m = re.search(r"Suce?ss\s+Rat[e\s]*[\s\n]*(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    # Estrategia 1: buscar "Sucess Rate" (sin 'c') seguido de porcentaje (PRIORIDAD MÁXIMA)
+    # PowerBI a veces renderiza "Sucess" sin la 'c'
+    m = re.search(r"Sucess\s+Rate[^%]{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            logger.info(f"✅ parse_success_rate → {val}% (patrón SR directo)")
+            logger.info(f"✅ parse_success_rate → {val}% (patrón Sucess Rate)")
             return str(val) + "%"
 
-    # Estrategia 2: buscar "Success Rate" con hasta 200 caracteres de distancia
-    m = re.search(r"Suce?ss\s*Rat[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    # Estrategia 2: buscar "Success Rate" (con 'c') seguido de porcentaje
+    m = re.search(r"Success\s+Rate[^%]{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
         if 0 < val <= 100:
-            logger.info(f"✅ parse_success_rate → {val}% (patrón SR flexible)")
+            logger.info(f"✅ parse_success_rate → {val}% (patrón Success Rate)")
             return str(val) + "%"
 
     # Estrategia 3: buscar línea que sea solo un porcentaje (XX% o XX %)
@@ -182,7 +182,7 @@ def parse_success_rate(text: str):
     valid_pcts = []
     for line in lines[-80:]:
         if any(kw in line.lower() for kw in ['ampliado', 'microsoft', 'top places', 'lugar', 'growth', 
-                                               'experiencia', 'rapidez', 'frescura', 'barra de datos']):
+                                               'experiencia', 'rapidez', 'frescura', 'barra de datos', 'calidad', 'apariencia', 'ambiente']):
             continue
         m = re.fullmatch(r"(\d{1,3})\s*%", line)
         if m:
