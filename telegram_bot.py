@@ -176,11 +176,11 @@ async def click_table_row(page, tienda: str) -> bool:
     return False
 
 def parse_success_rate(text: str, tienda: str = None):
-    """Extrae el porcentaje del donut 'Success Rate' (actualizado al hacer click en tienda)."""
+    """Extrae el porcentaje del donut 'Success Rate' (actualizado al hacer click en tienda o slicer)."""
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     normalized = " ".join(lines)
 
-    # Buscar "Success Rate" del donut (se actualiza al hacer click en la tienda)
+    # Buscar "Success Rate" del donut
     sr_idx = None
     for i, line in enumerate(lines):
         if re.search(r"Suce?ss\s*Rate", line, re.IGNORECASE):
@@ -189,46 +189,34 @@ def parse_success_rate(text: str, tienda: str = None):
             break
 
     if sr_idx is not None:
-        # Buscar ANTES de "Success Rate" con ventana corta:
-        # el valor real del donut está inmediatamente arriba del label,
-        # mientras que los 100% de la tabla aparecen mucho más lejos.
-        before = lines[max(0, sr_idx - 6): sr_idx]
-        for j in range(len(before) - 1, -1, -1):
-            bline = before[j]
-            # Excluir líneas con keywords de otros gráficos o tablas
-            if any(kw in bline.lower() for kw in ['top places', 'time line', 'controllers', 'criterio', 'barra de datos', 'experiencia', 'rapidez', 'frescura', 'calidad', 'apariencia', 'ambiente', 'resultado', 'meta']):
-                continue
-            m = re.fullmatch(r"(\d{1,3})\s*%", bline)
-            if m:
-                val = int(m.group(1))
-                if 0 < val <= 100:
-                    logger.info(f"✅ parse_success_rate → {val}% (donut, ANTES de SR, ventana corta)")
-                    return str(val) + "%"
-            # Caso SVG dividido: "86" + "%"
-            if j > 0 and re.fullmatch(r"%", bline) and re.fullmatch(r"\d{1,3}", before[j - 1]):
-                val = int(before[j - 1])
-                if 0 < val <= 100:
-                    logger.info(f"✅ parse_success_rate → {val}% (donut SVG, ANTES de SR, ventana corta)")
-                    return str(val) + "%"
-        
-        # Buscar DESPUÉS de "Success Rate" con ventana corta por si el DOM invierte el orden.
-        after = lines[sr_idx + 1: sr_idx + 7]
+        # El 75% o nota real del donut aparece DESPUÉS de "Sucess Rate" en el flujo del DOM actual,
+        # normalmente después de "Auditorias" y "Mar", a unas 3-6 líneas de distancia.
+        after = lines[sr_idx + 1: sr_idx + 15]
         for j, aline in enumerate(after):
-            if any(kw in aline.lower() for kw in ['top places', 'time line', 'controllers', 'criterio', 'barra de datos', 'experiencia', 'rapidez', 'frescura', 'calidad', 'apariencia', 'ambiente', 'resultado', 'meta']):
+            if any(kw in aline.lower() for kw in ['top places', 'time line', 'controllers', 'criterio', 'barra de datos']):
                 continue
             m = re.fullmatch(r"(\d{1,3})\s*%", aline)
             if m:
                 val = int(m.group(1))
                 if 0 < val <= 100:
-                    logger.info(f"✅ parse_success_rate → {val}% (donut, DESPUÉS de SR, ventana corta)")
+                    logger.info(f"✅ parse_success_rate → {val}% (donut, DESPUÉS de SR)")
                     return str(val) + "%"
-            # Caso SVG dividido
+            
+            # Caso SVG dividido: "75" y luego "%"
             if re.fullmatch(r"\d{1,3}", aline) and j + 1 < len(after):
                 if re.fullmatch(r"%", after[j + 1]):
                     val = int(aline)
                     if 0 < val <= 100:
-                        logger.info(f"✅ parse_success_rate → {val}% (donut SVG, DESPUÉS de SR, ventana corta)")
+                        logger.info(f"✅ parse_success_rate → {val}% (donut SVG, DESPUÉS de SR)")
                         return str(val) + "%"
+
+    # Estrategia 2: regex sobre texto normalizado para el formato de KPIs
+    m = re.search(r"Suce?ss\s*Rate.{0,100}?(?:Auditorias|Mar|Items|Tiendas).{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            logger.info(f"✅ parse_success_rate → {val}% (regex SR + KPIs)")
+            return str(val) + "%"
 
     logger.warning("❌ No se encontró Success Rate válido en el DOM.")
     return None
