@@ -176,11 +176,40 @@ async def click_table_row(page, tienda: str) -> bool:
     return False
 
 def parse_success_rate(text: str, tienda: str = None):
-    """Extrae el porcentaje del donut 'Success Rate' (actualizado al hacer click en tienda o slicer)."""
+    """Extrae el porcentaje del donut 'Success Rate' o de la vista general."""
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     normalized = " ".join(lines)
 
-    # Buscar "Success Rate" del donut
+    # 1. Estrategia principal: Buscar el nombre de la tienda y su porcentaje
+    # En PowerBI a menudo los valores de "Top Places" o gráficos de barras aparecen
+    # como el número (%) seguido o precedido por la categoría (PORONGOCHE).
+    if tienda:
+        for i, line in enumerate(lines):
+            if tienda.upper() in line.upper():
+                # Buscar porcentaje en las ±15 líneas alrededor del nombre de la tienda
+                start = max(0, i - 15)
+                end = min(len(lines), i + 16)
+                context_lines = lines[start:end]
+                
+                valid_pcts = []
+                for cl in context_lines:
+                    # Excluir líneas con métricas que sabemos que son de tabla
+                    if any(kw in cl.lower() for kw in ['barra de datos', 'experiencia', 'rapidez', 'frescura', 'calidad', 'apariencia', 'ambiente', 'criterio']):
+                        continue
+                    m = re.fullmatch(r"(\d{1,3})\s*%", cl)
+                    if m:
+                        val = int(m.group(1))
+                        if 0 < val <= 100:
+                            valid_pcts.append(val)
+                
+                # Si encontramos porcentajes cerca del nombre de la tienda, 
+                # devolvemos el más alto asumiendo que es el "Top Place" o la nota principal
+                if valid_pcts:
+                    best_val = max(valid_pcts)
+                    logger.info(f"✅ parse_success_rate → {best_val}% (Cerca de '{tienda}')")
+                    return str(best_val) + "%"
+
+    # 2. Buscar "Success Rate" del donut como fallback
     sr_idx = None
     for i, line in enumerate(lines):
         if re.search(r"Suce?ss\s*Rate", line, re.IGNORECASE):
@@ -189,8 +218,6 @@ def parse_success_rate(text: str, tienda: str = None):
             break
 
     if sr_idx is not None:
-        # El 75% o nota real del donut aparece DESPUÉS de "Sucess Rate" en el flujo del DOM actual,
-        # normalmente después de "Auditorias" y "Mar", a unas 3-6 líneas de distancia.
         after = lines[sr_idx + 1: sr_idx + 15]
         for j, aline in enumerate(after):
             if any(kw in aline.lower() for kw in ['top places', 'time line', 'controllers', 'criterio', 'barra de datos']):
@@ -201,22 +228,12 @@ def parse_success_rate(text: str, tienda: str = None):
                 if 0 < val <= 100:
                     logger.info(f"✅ parse_success_rate → {val}% (donut, DESPUÉS de SR)")
                     return str(val) + "%"
-            
-            # Caso SVG dividido: "75" y luego "%"
             if re.fullmatch(r"\d{1,3}", aline) and j + 1 < len(after):
                 if re.fullmatch(r"%", after[j + 1]):
                     val = int(aline)
                     if 0 < val <= 100:
                         logger.info(f"✅ parse_success_rate → {val}% (donut SVG, DESPUÉS de SR)")
                         return str(val) + "%"
-
-    # Estrategia 2: regex sobre texto normalizado para el formato de KPIs
-    m = re.search(r"Suce?ss\s*Rate.{0,100}?(?:Auditorias|Mar|Items|Tiendas).{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
-    if m:
-        val = int(m.group(1))
-        if 0 < val <= 100:
-            logger.info(f"✅ parse_success_rate → {val}% (regex SR + KPIs)")
-            return str(val) + "%"
 
     logger.warning("❌ No se encontró Success Rate válido en el DOM.")
     return None
@@ -300,40 +317,50 @@ async def extract_full_report() -> dict:
         await page.wait_for_timeout(1500)
 
         # ── Extraer scores por visita / tienda ───────────────────────────────
-        # ESTRATEGIA: Click en fila de tabla → el donut "Success Rate" se actualiza con la nota de esa tienda
+        # ESTRATEGIA: Obtener el texto general de la página ANTES de hacer clicks en la tabla,
+        # para capturar los valores de Top Places (que se borran al hacer click)
         for visita in ["Visita 1", "Visita 2"]:
             logger.info(f"\n{'='*40}\nProcesando {visita}")
             await click_slicer_option(page, "Nro. Visita", visita)
-            await page.wait_for_timeout(2500)
+            await page.wait_for_timeout(3500)
+            
+            # Obtener texto de la vista general (donde los Top Places están visibles)
+            full_text_general = await page_text(page)
 
             for tienda in TIENDAS:
-                logger.info(f"  Buscando {tienda} en tabla...")
-                score = "Sin visita"
-                try:
-                    clicked = await click_table_row(page, tienda)
-                    if clicked:
-                        await page.wait_for_timeout(3500)  # Esperar a que el donut se actualice
-                        
-                        full_text = await page_text(page)
-                        
-                        parsed = parse_success_rate(full_text, tienda=tienda)
-                        if parsed:
-                            score = parsed
-                            logger.info(f"  ✅ {tienda} | {visita} = {score}")
-                        else:
-                            logger.warning(f"  ⚠️ No se encontró score para {tienda} | {visita}")
-                        
-                        # Deseleccionar fila (click en área vacía)
-                        try:
-                            await page.mouse.click(960, 30)
-                            await page.wait_for_timeout(800)
-                        except Exception:
-                            pass
-                    else:
-                        logger.warning(f"  ⚠️ Fila no encontrada: {tienda}")
+                logger.info(f"  Buscando {tienda} en vista general...")
+                
+                # Intentar parsear de la vista general
+                parsed = parse_success_rate(full_text_general, tienda=tienda)
+                
+                if parsed:
+                    score = parsed
+                    logger.info(f"  ✅ {tienda} | {visita} = {score}")
+                else:
+                    score = "Sin visita"
+                    logger.warning(f"  ⚠️ No se encontró score para {tienda} en vista general, intentando click tabla...")
+                    # Fallback: intentar hacer click en la tabla si no se encontró en Top Places
+                    try:
+                        clicked = await click_table_row(page, tienda)
+                        if clicked:
+                            await page.wait_for_timeout(3500)
+                            full_text_detail = await page_text(page)
                             
-                except Exception as e:
-                    logger.error(f"  ❌ Error en {tienda}: {e}", exc_info=True)
+                            parsed_detail = parse_success_rate(full_text_detail, tienda=tienda)
+                            if parsed_detail:
+                                score = parsed_detail
+                                logger.info(f"  ✅ {tienda} | {visita} = {score} (Click en tabla)")
+                            
+                            # Deseleccionar fila
+                            try:
+                                await page.mouse.click(960, 30)
+                                await page.wait_for_timeout(800)
+                            except Exception:
+                                pass
+                        else:
+                            logger.warning(f"  ⚠️ Fila no encontrada: {tienda}")
+                    except Exception as e:
+                        logger.error(f"  ❌ Error en {tienda}: {e}", exc_info=True)
 
                 result["tiendas"][tienda][visita] = score
                 logger.info(f"  RESULTADO {tienda} | {visita}: {score}")
