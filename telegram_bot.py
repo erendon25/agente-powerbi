@@ -175,69 +175,74 @@ async def click_table_row(page, tienda: str) -> bool:
     logger.warning(f"No se encontró fila para '{tienda}'")
     return False
 
-def parse_success_rate(text: str):
-    """Extrae el porcentaje del 'Sucess Rate' del texto completo de la página."""
+def parse_success_rate(text: str, tienda: str = None):
+    """Extrae el porcentaje de Top Places para la tienda específica."""
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     normalized = " ".join(lines)
 
-    # DEBUG: Localizar "Sucess Rate" y mostrar contexto de ±20 líneas
+    # Estrategia 1: Buscar "Top Places" y luego el porcentaje cerca del nombre de la tienda
+    tp_idx = None
+    for i, line in enumerate(lines):
+        if re.search(r"Top\s+Places", line, re.IGNORECASE):
+            tp_idx = i
+            logger.info(f"🔍 'Top Places' encontrado en línea {i}")
+            break
+    
+    if tp_idx is not None and tienda:
+        # Buscar el nombre de la tienda en las siguientes 100 líneas
+        search_range = lines[tp_idx: tp_idx + 100]
+        for i, line in enumerate(search_range):
+            if tienda.upper() in line.upper():
+                logger.info(f"🏪 Tienda '{tienda}' encontrada en línea {tp_idx + i}")
+                # Buscar porcentaje en las 20 líneas ANTES de la tienda (el % está arriba de la barra)
+                before_store = search_range[max(0, i - 20): i]
+                for j in range(len(before_store) - 1, -1, -1):
+                    bline = before_store[j]
+                    m = re.fullmatch(r"(\d{1,3})\s*%", bline)
+                    if m:
+                        val = int(m.group(1))
+                        if 0 < val <= 100:
+                            logger.info(f"✅ parse_success_rate → {val}% (Top Places, antes de '{tienda}')")
+                            return str(val) + "%"
+                    # Caso SVG dividido
+                    if j > 0 and re.fullmatch(r"%", bline) and re.fullmatch(r"\d{1,3}", before_store[j - 1]):
+                        val = int(before_store[j - 1])
+                        if 0 < val <= 100:
+                            logger.info(f"✅ parse_success_rate → {val}% (Top Places SVG, antes de '{tienda}')")
+                            return str(val) + "%"
+                break
+    
+    # Estrategia 2 (fallback): Buscar "Sucess Rate" del donut
     sr_idx = None
     for i, line in enumerate(lines):
         if re.search(r"Suce?ss\s*Rate", line, re.IGNORECASE):
             sr_idx = i
-            logger.info(f"🔍 'Sucess Rate' encontrado en línea {i}")
-            start = max(0, i - 20)
-            end = min(len(lines), i + 21)
-            logger.info(f"📋 Contexto (líneas {start}-{end}):")
-            for idx in range(start, end):
-                prefix = ">>> " if idx == i else "    "
-                logger.info(f"{prefix}{idx}: {lines[idx][:80]}")
+            logger.info(f"🔍 'Success Rate' (donut) encontrado en línea {i}")
             break
 
     if sr_idx is not None:
-        # Buscar ANTES de "Sucess Rate" (primeras 20 líneas previas)
+        # Buscar ANTES de "Success Rate"
         before = lines[max(0, sr_idx - 20): sr_idx]
-        for j in range(len(before) - 1, -1, -1):  # Iterar en reversa
+        for j in range(len(before) - 1, -1, -1):
             bline = before[j]
             m = re.fullmatch(r"(\d{1,3})\s*%", bline)
             if m:
                 val = int(m.group(1))
                 if 0 < val <= 100:
-                    logger.info(f"✅ parse_success_rate → {val}% (ANTES de SR, línea {sr_idx - (len(before) - j)})")
-                    return str(val) + "%"
-            # Caso SVG dividido antes
-            if j > 0 and re.fullmatch(r"%", bline) and re.fullmatch(r"\d{1,3}", before[j - 1]):
-                val = int(before[j - 1])
-                if 0 < val <= 100:
-                    logger.info(f"✅ parse_success_rate → {val}% (ANTES de SR, SVG split)")
+                    logger.info(f"✅ parse_success_rate → {val}% (Success Rate donut, ANTES)")
                     return str(val) + "%"
         
-        # Buscar DESPUÉS de "Sucess Rate"
+        # Buscar DESPUÉS de "Success Rate"
         after = lines[sr_idx + 1: sr_idx + 51]
         for j, aline in enumerate(after):
             m = re.fullmatch(r"(\d{1,3})\s*%", aline)
             if m:
                 val = int(m.group(1))
                 if 0 < val <= 100:
-                    logger.info(f"✅ parse_success_rate → {val}% (DESPUÉS de SR, línea {sr_idx + 1 + j})")
+                    logger.info(f"✅ parse_success_rate → {val}% (Success Rate donut, DESPUÉS)")
                     return str(val) + "%"
-            # Caso SVG dividido después
-            if re.fullmatch(r"\d{1,3}", aline) and j + 1 < len(after):
-                if re.fullmatch(r"%", after[j + 1]):
-                    val = int(aline)
-                    if 0 < val <= 100:
-                        logger.info(f"✅ parse_success_rate → {val}% (DESPUÉS de SR, SVG split)")
-                        return str(val) + "%"
 
-    # Estrategia 2: regex sobre texto normalizado con ventana amplia
-    m = re.search(r"Suce?ss\s*Rate.{0,600}?(\d{1,3})\s*%", normalized, re.IGNORECASE | re.DOTALL)
-    if m:
-        val = int(m.group(1))
-        if 0 < val <= 100:
-            logger.info(f"✅ parse_success_rate → {val}% (regex SR amplio)")
-            return str(val) + "%"
-
-    logger.warning("❌ No se encontró Success Rate válido en el DOM.")
+    logger.warning("❌ No se encontró porcentaje válido en Top Places ni Success Rate.")
     return None
 
 # ─── Extracción principal ─────────────────────────────────────────────────────
@@ -358,7 +363,7 @@ async def extract_full_report() -> dict:
                     logger.info(full_text[:3000])  # Primeros 3000 caracteres
                     logger.info(f"{'='*80}\n")
                     
-                    parsed = parse_success_rate(full_text)
+                    parsed = parse_success_rate(full_text, tienda=tienda)
                     if parsed:
                         score = parsed
                         logger.info(f"  ✅ {tienda} | {visita} = {score}")
