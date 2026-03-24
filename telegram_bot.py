@@ -79,103 +79,105 @@ async def page_text(page) -> str:
                 pass
     return txt
 
-async def click_slicer_option(page, label: str, option: str):
+async def click_slicer_option(page, label: str, option: str) -> bool:
     """Abre el dropdown del slicer 'label' y selecciona 'option'."""
     for frame in page.frames:
         try:
-            headers = frame.locator("h3.slicer-header-text").filter(has_text=label)
-            if await headers.count() == 0:
-                continue
-            container = headers.first.locator(
-                "xpath=ancestor::div[contains(@class,'slicer-container')]"
-            ).first
-            box = container.locator(".slicer-restatement")
-
-            # Abrir dropdown
-            if await box.count() > 0:
-                await box.first.click(force=True)
-            else:
-                await container.click(force=True)
-            await page.wait_for_timeout(1200)
-
-            # Limpiar selección actual si existe botón borrar
-            clear = container.locator(
-                ".clear-filter, i[title*='Borrar'], i[title*='Clear'], .slicer-clear"
-            )
-            if await clear.count() > 0 and await clear.first.is_visible():
-                await clear.first.click(force=True)
-                await page.wait_for_timeout(800)
-
-            # Hacer "Seleccionar todo" primero para deseleccionar todo (toggle)
-            for select_all_text in ["Seleccionar todo", "Select all"]:
-                items = frame.locator(".slicerItemContainer")
-                cnt = await items.count()
-                for i in range(cnt):
-                    try:
-                        rt = await items.nth(i).inner_text(timeout=400)
-                        if select_all_text.lower() in rt.lower():
-                            await items.nth(i).click(force=True)
-                            await page.wait_for_timeout(800)
-                            break
-                    except Exception:
-                        continue
-
-            # Escribir en buscador
-            search = container.locator("input.searchInput")
-            if await search.count() > 0:
-                await search.first.fill(option)
-                await page.wait_for_timeout(800)
-
-            # Seleccionar la opción
-            items = frame.locator(".slicerItemContainer")
-            cnt = await items.count()
+            visuals = frame.locator("visual-container-modern")
+            cnt = await visuals.count()
             for i in range(cnt):
                 try:
-                    rt = await items.nth(i).inner_text(timeout=400)
-                    if option.lower() in rt.lower() and "seleccionar todo" not in rt.lower() and "select all" not in rt.lower():
-                        await items.nth(i).click(force=True)
+                    v = visuals.nth(i)
+                    # Comprobar si este visual contiene el texto del label y es un slicer
+                    header = v.locator(".slicer-header-text, .visualTitle")
+                    if await header.count() > 0:
+                        header_text = await header.first.inner_text()
+                        if label.lower() not in header_text.lower():
+                            continue
+                    else:
+                        # Fallback a inner_text
+                        v_text = await v.inner_text()
+                        if not v_text or label.lower() not in v_text.lower():
+                            continue
+                    
+                    if await v.locator(".slicer-container").count() == 0:
+                        continue
+                        
+                    # Es el slicer correcto.
+                    # Abrir dropdown si existe
+                    dropdown = v.locator(".slicer-restatement, .slicer-dropdown-menu")
+                    if await dropdown.count() > 0:
+                        await dropdown.first.click(force=True)
                         await page.wait_for_timeout(1000)
                         
-                        # Cerrar slicer haciendo click fuera
+                    # Limpiar selección actual si existe botón borrar
+                    clear = v.locator(".clear-filter, i[title*='Borrar'], i[title*='Clear'], .slicer-clear")
+                    if await clear.count() > 0 and await clear.first.is_visible():
+                        await clear.first.click(force=True)
+                        await page.wait_for_timeout(800)
+                        
+                    # Seleccionar la opción
+                    items = frame.locator(".slicerItemContainer")
+                    item_cnt = await items.count()
+                    for j in range(item_cnt):
                         try:
-                            await page.mouse.click(10, 10)
-                            await page.wait_for_timeout(500)
+                            rt = await items.nth(j).inner_text(timeout=400)
+                            if option.lower() in rt.lower() and "seleccionar todo" not in rt.lower() and "select all" not in rt.lower():
+                                await items.nth(j).click(force=True)
+                                await page.wait_for_timeout(1000)
+                                
+                                # Cerrar slicer
+                                try:
+                                    await page.mouse.click(10, 10)
+                                    await page.wait_for_timeout(500)
+                                except Exception:
+                                    pass
+                                return True
                         except Exception:
-                            pass
-                        return True
-                except Exception:
-                    pass
+                            continue
+                except Exception as e:
+                    if "Target crashed" in str(e) or "detached" in str(e):
+                        continue
         except Exception as e:
             logger.warning(f"Error procesando frame para slicer '{label}': {e}")
             pass
-    
+            
     logger.warning(f"Slicer '{label}' → '{option}' ❌ no encontrado")
     return False
 
-async def click_table_row(page, tienda: str) -> bool:
-    """Hace clic en la fila de la tabla que contiene el nombre de tienda."""
+async def click_store_filter(page, tienda: str) -> bool:
+    """Busca un visual que contenga el nombre de la tienda (y que no sea una tabla de detalles)
+    y hace click en él para filtrar el dashboard."""
     tienda_up = tienda.upper()
-    row_selectors = ["tr", "div[role='row']", "[class*='tableRow']", "[class*='row']"]
     for frame in page.frames:
-        for sel in row_selectors:
-            try:
-                rows = frame.locator(sel)
-                cnt = await rows.count()
-                if cnt < 2:
-                    continue
-                for i in range(cnt):
-                    row = rows.nth(i)
-                    try:
-                        rt = (await row.inner_text(timeout=400)).upper().strip()
-                        if tienda_up in rt:
-                            logger.info(f"Fila '{tienda}' encontrada: {rt[:80]!r}")
-                            await row.click(force=True)
+        try:
+            visuals = frame.locator("visual-container-modern")
+            cnt = await visuals.count()
+            for i in range(cnt):
+                try:
+                    v = visuals.nth(i)
+                    v_text = await v.inner_text(timeout=500)
+                    if not v_text or tienda_up not in v_text.upper():
+                        continue
+                        
+                    v_text_lower = v_text.lower()
+                    # Evitar la matriz grande de criterios que tiene las preguntas y porcentajes de 100%
+                    if any(k in v_text_lower for k in ['experiencia', 'rapidez', 'frescura', 'calidad', 'apariencia', 'ambiente', '¿']):
+                        continue
+                    
+                    # Intentar hacer click en el texto
+                    texts = v.locator(f"text={tienda_up}")
+                    t_cnt = await texts.count()
+                    for j in range(t_cnt):
+                        el = texts.nth(j)
+                        if await el.is_visible():
+                            await el.click(force=True)
+                            logger.info(f"Click en '{tienda}' realizado en visual válido.")
                             return True
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-    logger.warning(f"No se encontró fila para '{tienda}'")
+                except Exception:
+                    continue
+        except Exception as e:
+            pass
     return False
 
 def parse_success_rate(text: str, tienda: str = None):
@@ -183,36 +185,7 @@ def parse_success_rate(text: str, tienda: str = None):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     normalized = " ".join(lines)
 
-    # 1. Estrategia principal: Buscar el nombre de la tienda y su porcentaje
-    # En PowerBI a menudo los valores de "Top Places" o gráficos de barras aparecen
-    # como el número (%) seguido o precedido por la categoría (PORONGOCHE).
-    if tienda:
-        for i, line in enumerate(lines):
-            if tienda.upper() in line.upper():
-                # Buscar porcentaje en las ±15 líneas alrededor del nombre de la tienda
-                start = max(0, i - 15)
-                end = min(len(lines), i + 16)
-                context_lines = lines[start:end]
-                
-                valid_pcts = []
-                for cl in context_lines:
-                    # Excluir líneas con métricas que sabemos que son de tabla
-                    if any(kw in cl.lower() for kw in ['barra de datos', 'experiencia', 'rapidez', 'frescura', 'calidad', 'apariencia', 'ambiente', 'criterio']):
-                        continue
-                    m = re.fullmatch(r"(\d{1,3})\s*%", cl)
-                    if m:
-                        val = int(m.group(1))
-                        if 0 < val <= 100:
-                            valid_pcts.append(val)
-                
-                # Si encontramos porcentajes cerca del nombre de la tienda, 
-                # devolvemos el más alto asumiendo que es el "Top Place" o la nota principal
-                if valid_pcts:
-                    best_val = max(valid_pcts)
-                    logger.info(f"✅ parse_success_rate → {best_val}% (Cerca de '{tienda}')")
-                    return str(best_val) + "%"
-
-    # 2. Buscar "Success Rate" del donut como fallback
+    # Buscar "Success Rate" del donut
     sr_idx = None
     for i, line in enumerate(lines):
         if re.search(r"Suce?ss\s*Rate", line, re.IGNORECASE):
@@ -320,19 +293,18 @@ async def extract_full_report() -> dict:
         await page.wait_for_timeout(1500)
 
         # ── Extraer scores por visita / tienda ───────────────────────────────
-        # ESTRATEGIA: Aplicar filtro en el Slicer "Tiendas" para actualizar el donut.
         for visita in ["Visita 1", "Visita 2"]:
             logger.info(f"\n{'='*40}\nProcesando {visita}")
             await click_slicer_option(page, "Nro. Visita", visita)
             await page.wait_for_timeout(3500)
             
             for tienda in TIENDAS:
-                logger.info(f"  Filtrando {tienda} en Slicer...")
+                logger.info(f"  Filtrando {tienda} haciendo click en visual...")
                 score = "Sin visita"
                 
                 try:
-                    slicer_applied = await click_slicer_option(page, "Tiendas", tienda)
-                    if slicer_applied:
+                    clicked = await click_store_filter(page, tienda)
+                    if clicked:
                         await page.wait_for_timeout(3500)
                         
                         full_text = await page_text(page)
@@ -345,9 +317,13 @@ async def extract_full_report() -> dict:
                             logger.warning(f"  ⚠️ No se encontró score para {tienda} | {visita}")
                         
                         # Limpiar filtro de tienda haciendo click en un espacio en blanco para deseleccionar
-                        # o el mismo slicer se limpia con la lógica de click_slicer_option
+                        try:
+                            await page.mouse.click(960, 30)
+                            await page.wait_for_timeout(1000)
+                        except Exception:
+                            pass
                     else:
-                        logger.warning(f"  ⚠️ No se pudo aplicar el slicer para: {tienda}")
+                        logger.warning(f"  ⚠️ No se pudo hacer click para filtrar: {tienda}")
                         
                 except Exception as e:
                     logger.error(f"  ❌ Error en {tienda}: {e}", exc_info=True)
