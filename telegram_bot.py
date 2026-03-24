@@ -155,14 +155,23 @@ async def click_table_row(page, tienda: str) -> bool:
 def parse_success_rate(text: str):
     """Extrae el porcentaje del 'Sucess Rate' del texto completo de la página."""
     
-    # ESTRATEGIA DEFINITIVA: PowerBI renderiza el texto de las métricas (Tarjetas) al final del DOM. 
-    # El Sucess Rate (ej. "86%") aparece en una línea propia hacia el final, separado de su título.
     lines = [line.strip() for line in text.split("\n") if line.strip()]
-    
-    # Revisar las últimas 60 líneas buscando una que sea exactamente "XX%" o "XX %"
+    normalized = " ".join(text.split())
+
+    # Estrategia 1: buscar después de "Success Rate" o "Sucess Rate" (PRIORIDAD)
+    # Este es el patrón más confiable porque busca específicamente el donut
+    m = re.search(r"Suce?ss\s*Rat[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            logger.info(f"parse_success_rate → {val}% (patrón SR)")
+            return str(val) + "%"
+
+    # Estrategia 2: buscar línea que sea solo un porcentaje (XX% o XX %)
+    # PowerBI renderiza el valor de la métrica en una línea propia
+    # Pero solo si no encontramos Success Rate
     valid_pcts = []
-    for line in lines[-60:]:
-        # Evitar ruidos comunes al final
+    for line in lines[-80:]:
         if 'ampliado' in line.lower() or 'microsoft' in line.lower():
             continue
         m = re.fullmatch(r"(\d{1,3})\s*%", line)
@@ -170,27 +179,34 @@ def parse_success_rate(text: str):
             val = int(m.group(1))
             if 0 < val <= 100:
                 valid_pcts.append(val)
-                
+    
     if valid_pcts:
-        # El número de tarjeta que buscamos casi siempre está al final ("76%" en tu log)
-        logger.info(f"parse_success_rate → {valid_pcts[-1]}% (aislado al final del documento)")
+        logger.info(f"parse_success_rate → {valid_pcts[-1]}% (línea aislada)")
         return f"{valid_pcts[-1]}%"
-        
-    # FALLBACK en caso de que esté intercalado en el mismo flujo en lugar de aislado:
-    norm = " ".join(lines)
-    strategies = [
-        r"Items con nota\s+Suce?ss\s+Rat.{0,30}?(\d{1,3})\s*%",
-        r"Resumen General.{0,200}?(\d{1,3})\s*%",
-        r"(\d{1,3})\s*%\s*.{0,60}?Suce?ss\s+Rat",
-        r"Suce?ss\s+Rat.{0,200}?(\d{1,3})\s*%",
-    ]
-    for pattern in strategies:
-        m = re.search(pattern, norm, re.IGNORECASE)
-        if m:
-            val = int(m.group(1))
-            if 0 < val <= 100:
-                logger.info(f"parse_success_rate fallback → {val}% (patrón: {pattern[:40]})")
-                return f"{val}%"
+
+    # Estrategia 3: buscar en sección Resumen General
+    m = re.search(r"Resumen General[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            logger.info(f"parse_success_rate → {val}% (patrón Resumen)")
+            return str(val) + "%"
+
+    # Estrategia 4: buscar el número inmediatamente antes o después de "Nota"
+    m = re.search(r"Nota\D{0,30}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            logger.info(f"parse_success_rate → {val}% (patrón Nota)")
+            return str(val) + "%"
+
+    # Estrategia 5: buscar "Items con nota" seguido de un porcentaje
+    m = re.search(r"Items\s+con\s+nota[^%]{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            logger.info(f"parse_success_rate → {val}% (patrón Items)")
+            return str(val) + "%"
                 
     logger.warning("No se encontró Success Rate válido en el DOM.")
     return None
@@ -287,6 +303,13 @@ async def extract_full_report() -> dict:
                     if clicked:
                         await page.wait_for_timeout(2500)
                         full_text = await page_text(page)
+                        
+                        # DEBUG: guardar el texto para diagnosticar
+                        debug_file = f"debug_{tienda.replace(' ', '_')}_{visita.replace(' ', '_')}.txt"
+                        with open(debug_file, "w", encoding="utf-8") as f:
+                            f.write(full_text)
+                        logger.info(f"💾 Debug guardado en: {debug_file}")
+                        
                         # Log de diagnóstico: primeros 500 chars normalizados
                         norm_dbg = " ".join(full_text.split())
                         logger.info(f"[{tienda}|{visita}] Texto (500c): {norm_dbg[:500]}")

@@ -87,11 +87,19 @@ def parse_score_from_row(row_text: str) -> str | None:
 def parse_success_rate(text: str) -> str | None:
     """
     Busca el porcentaje del donut 'Sucess Rate' en el texto de la página.
-    Solo se usa cuando no se pudo leer de la fila directamente.
+    Intenta múltiples estrategias para capturar el valor correcto.
     """
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
     normalized = " ".join(text.split())
 
-    # Estrategia 1: primer % despues del label 'Sucess Rate' (hasta 200 chars)
+    # DEBUG: mostrar contexto alrededor de "Success Rate"
+    sr_idx = normalized.lower().find("success rate")
+    if sr_idx >= 0:
+        context = normalized[max(0, sr_idx-50):min(len(normalized), sr_idx+250)]
+        print(f"    🔍 Contexto SR: ...{context}...")
+
+    # Estrategia 1: buscar después de "Success Rate" o "Sucess Rate" (PRIORIDAD)
+    # Este es el patrón más confiable porque busca específicamente el donut
     m = re.search(r"Suce?ss\s*Rat[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
@@ -99,7 +107,24 @@ def parse_success_rate(text: str) -> str | None:
             print(f"    📊 Score (patrón SR): {val}%")
             return str(val) + "%"
 
-    # Estrategia 2: buscar en sección Resumen General
+    # Estrategia 2: buscar línea que sea solo un porcentaje (XX% o XX %)
+    # PowerBI renderiza el valor de la métrica en una línea propia
+    # Pero solo si no encontramos Success Rate
+    valid_pcts = []
+    for line in lines[-80:]:
+        if 'ampliado' in line.lower() or 'microsoft' in line.lower():
+            continue
+        m = re.fullmatch(r"(\d{1,3})\s*%", line)
+        if m:
+            val = int(m.group(1))
+            if 0 < val <= 100:
+                valid_pcts.append(val)
+    
+    if valid_pcts:
+        print(f"    📊 Score (línea aislada): {valid_pcts[-1]}% | Todas: {valid_pcts}")
+        return f"{valid_pcts[-1]}%"
+
+    # Estrategia 3: buscar en sección Resumen General
     m = re.search(r"Resumen General[^%]{0,200}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
@@ -107,7 +132,7 @@ def parse_success_rate(text: str) -> str | None:
             print(f"    📊 Score (patrón Resumen): {val}%")
             return str(val) + "%"
 
-    # Estrategia 3: buscar el número inmediatamente antes o despues de "Nota"
+    # Estrategia 4: buscar el número inmediatamente antes o después de "Nota"
     m = re.search(r"Nota\D{0,30}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
     if m:
         val = int(m.group(1))
@@ -115,6 +140,15 @@ def parse_success_rate(text: str) -> str | None:
             print(f"    📊 Score (patrón Nota): {val}%")
             return str(val) + "%"
 
+    # Estrategia 5: buscar "Items con nota" seguido de un porcentaje
+    m = re.search(r"Items\s+con\s+nota[^%]{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            print(f"    📊 Score (patrón Items): {val}%")
+            return str(val) + "%"
+
+    print(f"    ❌ No se encontró porcentaje válido")
     return None
 
 
@@ -397,7 +431,11 @@ async def extract_full_report() -> dict:
         for visita in ["Visita 1", "Visita 2"]:
             print(f"🔄 Filtrando {visita}...")
             # 1. Seleccionar solo esta visita en el filtro de Nro. Visita
-            await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True)
+            if not await click_filter_option(page, "Nro. Visita", visita, deselect_all_first=True):
+                print(f"  ⚠️ No se pudo aplicar filtro {visita}, saltando...")
+                for tienda in ["PORONGOCHE", "MALL PORONGOCHE"]:
+                    result["tiendas"][tienda][visita] = "Sin visita"
+                continue
             await page.wait_for_timeout(2000)  # esperar render
 
             for tienda in ["PORONGOCHE", "MALL PORONGOCHE"]:
@@ -419,16 +457,15 @@ async def extract_full_report() -> dict:
                                     await page.wait_for_timeout(2500)
                                     
                                     page_txt = await page_text(page)
-                                    m = re.search(r"(\d{1,3})\s*%\s*\n*.*Suce?ss\s+Rate", page_txt, re.IGNORECASE)
-                                    if m:
-                                        score = m.group(1) + "%"
-                                    else:
-                                        m2 = re.search(r"Suce?ss\s+Rate\s*\n?\s*(\d{1,3})\s*%", page_txt, re.IGNORECASE)
-                                        if m2:
-                                            score = m2.group(1) + "%"
-                                        else:
-                                            rg = re.search(r"Resumen General[^%]{0,150}?(\d{1,3})\s*%", page_txt, re.IGNORECASE)
-                                            score = rg.group(1) + "%" if rg else "Sin visita"
+                                    # DEBUG: guardar el texto para diagnosticar
+                                    debug_file = f"debug_{tienda.replace(' ', '_')}_{visita.replace(' ', '_')}.txt"
+                                    with open(debug_file, "w", encoding="utf-8") as f:
+                                        f.write(page_txt)
+                                    print(f"    💾 Debug guardado en: {debug_file}")
+                                    
+                                    score = parse_success_rate(page_txt)
+                                    if not score:
+                                        score = "Sin visita"
                                     
                                     # 3. Clic neutro para deseleccionar
                                     await lbl.click(force=True)
