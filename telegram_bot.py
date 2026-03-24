@@ -64,9 +64,19 @@ async def page_text(page) -> str:
     txt = ""
     for f in page.frames:
         try:
-            txt += await f.evaluate(JS) + "\n"
+            result = await asyncio.wait_for(f.evaluate(JS), timeout=12.0)
+            txt += result + "\n"
+        except asyncio.TimeoutError:
+            logger.warning("page_text: frame timeout (12s), continuando...")
+            try:
+                txt += await f.inner_text("body", timeout=5000) + "\n"
+            except Exception:
+                pass
         except Exception:
-            pass
+            try:
+                txt += await f.inner_text("body", timeout=5000) + "\n"
+            except Exception:
+                pass
     return txt
 
 async def click_slicer_option(page, label: str, option: str):
