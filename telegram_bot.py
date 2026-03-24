@@ -310,19 +310,22 @@ async def extract_full_report() -> dict:
         await page.wait_for_timeout(1500)
 
         # ── Extraer scores por visita / tienda ───────────────────────────────
-        # ESTRATEGIA: Click en fila de tabla → el donut "Success Rate" se actualiza con la nota de esa tienda
+        # ESTRATEGIA: Aplicar filtro de Tienda via slicer "Tiendas" para que el donut se actualice
         for visita in ["Visita 1", "Visita 2"]:
             logger.info(f"\n{'='*40}\nProcesando {visita}")
             await click_slicer_option(page, "Nro. Visita", visita)
             await page.wait_for_timeout(2500)
 
             for tienda in TIENDAS:
-                logger.info(f"  Buscando {tienda}...")
+                logger.info(f"  Filtrando {tienda} via slicer...")
                 score = "Sin visita"
                 try:
-                    clicked = await click_table_row(page, tienda)
-                    if clicked:
+                    # Aplicar filtro de tienda via slicer "Tiendas"
+                    try:
+                        await click_slicer_option(page, "Tiendas", tienda)
+                        logger.info(f"  ✅ Slicer 'Tiendas' aplicado para {tienda}")
                         await page.wait_for_timeout(3500)  # Esperar a que el donut se actualice
+                        
                         full_text = await page_text(page)
                         
                         # DEBUG: mostrar contexto completo en logs
@@ -339,14 +342,16 @@ async def extract_full_report() -> dict:
                         else:
                             logger.warning(f"  ⚠️ No se encontró score para {tienda} | {visita}")
                         
-                        # Deseleccionar fila (click en área vacía)
+                        # Limpiar filtro de tienda (click en "Seleccionar todo" o deseleccionar)
                         try:
                             await page.mouse.click(960, 30)
                             await page.wait_for_timeout(800)
                         except Exception:
                             pass
-                    else:
-                        logger.warning(f"  ⚠️ Fila no encontrada: {tienda}")
+                    except Exception as e:
+                        logger.warning(f"  ⚠️ No se pudo aplicar slicer 'Tiendas': {e}")
+                        # Fallback: buscar en tabla sin filtrar
+                        logger.info(f"  Nota: capturando sin filtro de tienda específico")
                             
                 except Exception as e:
                     logger.error(f"  ❌ Error en {tienda}: {e}", exc_info=True)
