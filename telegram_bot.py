@@ -178,9 +178,11 @@ def parse_success_rate(text: str):
 
     # Estrategia 3: buscar línea que sea solo un porcentaje (XX% o XX %)
     # Pero EXCLUIR líneas que contengan palabras clave de otros gráficos
+    # IMPORTANTE: Excluir también "EXPERIENCIA", "RAPIDEZ", "FRESCURA" que son métricas de tabla
     valid_pcts = []
     for line in lines[-80:]:
-        if any(kw in line.lower() for kw in ['ampliado', 'microsoft', 'top places', 'lugar', 'growth']):
+        if any(kw in line.lower() for kw in ['ampliado', 'microsoft', 'top places', 'lugar', 'growth', 
+                                               'experiencia', 'rapidez', 'frescura', 'barra de datos']):
             continue
         m = re.fullmatch(r"(\d{1,3})\s*%", line)
         if m:
