@@ -83,65 +83,72 @@ async def click_slicer_option(page, label: str, option: str) -> bool:
     """Abre el dropdown del slicer 'label' y selecciona 'option'."""
     for frame in page.frames:
         try:
-            visuals = frame.locator(".visual-container-modern, visual-container-modern")
-            cnt = await visuals.count()
+            headers = frame.locator("h3.slicer-header-text").filter(has_text=label)
+            if await headers.count() == 0:
+                continue
+            container = headers.first.locator(
+                "xpath=ancestor::div[contains(@class,'slicer-container')]"
+            ).first
+            box = container.locator(".slicer-restatement")
+
+            # Abrir dropdown
+            if await box.count() > 0:
+                await box.first.click(force=True)
+            else:
+                await container.click(force=True)
+            await page.wait_for_timeout(1200)
+
+            # Limpiar selección actual si existe botón borrar
+            clear = container.locator(
+                ".clear-filter, i[title*='Borrar'], i[title*='Clear'], .slicer-clear"
+            )
+            if await clear.count() > 0 and await clear.first.is_visible():
+                await clear.first.click(force=True)
+                await page.wait_for_timeout(800)
+
+            # Hacer "Seleccionar todo" primero para deseleccionar todo (toggle)
+            for select_all_text in ["Seleccionar todo", "Select all"]:
+                items = frame.locator(".slicerItemContainer")
+                cnt = await items.count()
+                for i in range(cnt):
+                    try:
+                        rt = await items.nth(i).inner_text(timeout=400)
+                        if select_all_text.lower() in rt.lower():
+                            await items.nth(i).click(force=True)
+                            await page.wait_for_timeout(800)
+                            break
+                    except Exception:
+                        continue
+
+            # Escribir en buscador
+            search = container.locator("input.searchInput")
+            if await search.count() > 0:
+                await search.first.fill(option)
+                await page.wait_for_timeout(800)
+
+            # Seleccionar la opción
+            items = frame.locator(".slicerItemContainer")
+            cnt = await items.count()
             for i in range(cnt):
                 try:
-                    v = visuals.nth(i)
-                    # Comprobar si este visual contiene el texto del label y es un slicer
-                    header = v.locator(".slicer-header-text, .visualTitle")
-                    if await header.count() > 0:
-                        header_text = await header.first.inner_text()
-                        if label.lower() not in header_text.lower():
-                            continue
-                    else:
-                        # Fallback a inner_text
-                        v_text = await v.inner_text()
-                        if not v_text or label.lower() not in v_text.lower():
-                            continue
-                    
-                    if await v.locator(".slicer-container").count() == 0:
-                        continue
-                        
-                    # Es el slicer correcto.
-                    # Abrir dropdown si existe
-                    dropdown = v.locator(".slicer-restatement, .slicer-dropdown-menu")
-                    if await dropdown.count() > 0:
-                        await dropdown.first.click(force=True)
+                    rt = await items.nth(i).inner_text(timeout=400)
+                    if option.lower() in rt.lower() and "seleccionar todo" not in rt.lower() and "select all" not in rt.lower():
+                        await items.nth(i).click(force=True)
                         await page.wait_for_timeout(1000)
                         
-                    # Limpiar selección actual si existe botón borrar
-                    clear = v.locator(".clear-filter, i[title*='Borrar'], i[title*='Clear'], .slicer-clear")
-                    if await clear.count() > 0 and await clear.first.is_visible():
-                        await clear.first.click(force=True)
-                        await page.wait_for_timeout(800)
-                        
-                    # Seleccionar la opción
-                    items = frame.locator(".slicerItemContainer")
-                    item_cnt = await items.count()
-                    for j in range(item_cnt):
+                        # Cerrar slicer haciendo click fuera
                         try:
-                            rt = await items.nth(j).inner_text(timeout=400)
-                            if option.lower() in rt.lower() and "seleccionar todo" not in rt.lower() and "select all" not in rt.lower():
-                                await items.nth(j).click(force=True)
-                                await page.wait_for_timeout(1000)
-                                
-                                # Cerrar slicer
-                                try:
-                                    await page.mouse.click(10, 10)
-                                    await page.wait_for_timeout(500)
-                                except Exception:
-                                    pass
-                                return True
+                            await page.mouse.click(10, 10)
+                            await page.wait_for_timeout(500)
                         except Exception:
-                            continue
-                except Exception as e:
-                    if "Target crashed" in str(e) or "detached" in str(e):
-                        continue
+                            pass
+                        return True
+                except Exception:
+                    pass
         except Exception as e:
             logger.warning(f"Error procesando frame para slicer '{label}': {e}")
             pass
-            
+    
     logger.warning(f"Slicer '{label}' → '{option}' ❌ no encontrado")
     return False
 
