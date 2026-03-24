@@ -159,29 +159,22 @@ def parse_success_rate(text: str):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     normalized = " ".join(text.split())
 
-    # Estrategia 1: buscar "Sucess Rate" (sin 'c') y extraer el PRIMER porcentaje DESPUÉS de él
-    # IMPORTANTE: El porcentaje viene DESPUÉS de "Sucess Rate" en el DOM, no antes
-    sr_idx = normalized.lower().find("sucess rate")
-    if sr_idx >= 0:
-        # Buscar desde "Sucess Rate" hacia adelante (máximo 200 caracteres)
-        after_sr = normalized[sr_idx+11:sr_idx+200]  # +11 para saltar "Sucess Rate"
-        m = re.search(r"(\d{1,3})\s*%", after_sr)
-        if m:
-            val = int(m.group(1))
-            if 0 < val <= 100:
-                logger.info(f"✅ parse_success_rate → {val}% (patrón Sucess Rate - después)")
-                return str(val) + "%"
+    # Estrategia 1: buscar "Sucess Rate" ... "Tiendas" ... y extraer el porcentaje entre ellos
+    # Este patrón es más específico y evita capturar porcentajes de la tabla
+    m = re.search(r"Sucess\s+Rate[^T]*?Tiendas[^%]{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            logger.info(f"✅ parse_success_rate → {val}% (patrón SR-Tiendas)")
+            return str(val) + "%"
 
-    # Estrategia 2: buscar "Success Rate" (con 'c') y extraer el PRIMER porcentaje DESPUÉS
-    sr_idx = normalized.lower().find("success rate")
-    if sr_idx >= 0:
-        after_sr = normalized[sr_idx+12:sr_idx+200]  # +12 para saltar "Success Rate"
-        m = re.search(r"(\d{1,3})\s*%", after_sr)
-        if m:
-            val = int(m.group(1))
-            if 0 < val <= 100:
-                logger.info(f"✅ parse_success_rate → {val}% (patrón Success Rate - después)")
-                return str(val) + "%"
+    # Estrategia 2: buscar "Success Rate" ... "Tiendas" ... y extraer el porcentaje
+    m = re.search(r"Success\s+Rate[^T]*?Tiendas[^%]{0,100}?(\d{1,3})\s*%", normalized, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        if 0 < val <= 100:
+            logger.info(f"✅ parse_success_rate → {val}% (patrón Success-Tiendas)")
+            return str(val) + "%"
 
     # Estrategia 3: buscar línea que sea solo un porcentaje (XX% o XX %)
     # Pero EXCLUIR líneas que contengan palabras clave de otros gráficos
