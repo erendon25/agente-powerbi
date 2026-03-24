@@ -49,10 +49,22 @@ def run_dummy_server():
 
 # ─── Utilidades Playwright ────────────────────────────────────────────────────
 async def page_text(page) -> str:
+    JS = """() => {
+        const walker = document.createTreeWalker(
+            document.body, NodeFilter.SHOW_TEXT, null
+        );
+        const parts = [];
+        let node;
+        while ((node = walker.nextNode())) {
+            const t = node.textContent.trim();
+            if (t) parts.push(t);
+        }
+        return parts.join('\\n');
+    }"""
     txt = ""
     for f in page.frames:
         try:
-            txt += await f.inner_text("body", timeout=5000) + "\n"
+            txt += await f.evaluate(JS) + "\n"
         except Exception:
             pass
     return txt
