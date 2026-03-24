@@ -83,7 +83,7 @@ async def click_slicer_option(page, label: str, option: str) -> bool:
     """Abre el dropdown del slicer 'label' y selecciona 'option'."""
     for frame in page.frames:
         try:
-            visuals = frame.locator("visual-container-modern")
+            visuals = frame.locator(".visual-container-modern, visual-container-modern")
             cnt = await visuals.count()
             for i in range(cnt):
                 try:
@@ -151,7 +151,7 @@ async def click_store_filter(page, tienda: str) -> bool:
     tienda_up = tienda.upper()
     for frame in page.frames:
         try:
-            visuals = frame.locator("visual-container-modern")
+            visuals = frame.locator(".visual-container-modern, visual-container-modern")
             cnt = await visuals.count()
             for i in range(cnt):
                 try:
