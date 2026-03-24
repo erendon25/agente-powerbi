@@ -163,20 +163,21 @@ async def click_store_filter(page, tienda: str) -> bool:
             for i in range(cnt):
                 try:
                     v = visuals.nth(i)
-                    v_text = await v.inner_text(timeout=500)
+                    v_text = await v.inner_text(timeout=400)
                     if not v_text or tienda_up not in v_text.upper():
                         continue
                         
                     v_text_lower = v_text.lower()
                     # Evitar la matriz grande de criterios que tiene las preguntas y porcentajes de 100%
-                    if any(k in v_text_lower for k in ['experiencia', 'rapidez', 'frescura', 'calidad', 'apariencia', 'ambiente', '¿']):
+                    if any(k in v_text_lower for k in ['experiencia', 'rapidez', 'frescura', 'calidad', 'apariencia', 'ambiente', '¿', 'pregunta']):
                         continue
                     
-                    # Intentar hacer click en el texto
-                    texts = v.locator(f"text={tienda_up}")
-                    t_cnt = await texts.count()
+                    # Intentar hacer click en el texto usando get_by_text
+                    # Se busca ignorando mayúsculas/minúsculas implícitamente
+                    targets = v.get_by_text(tienda, exact=False)
+                    t_cnt = await targets.count()
                     for j in range(t_cnt):
-                        el = texts.nth(j)
+                        el = targets.nth(j)
                         if await el.is_visible():
                             await el.click(force=True)
                             logger.info(f"Click en '{tienda}' realizado en visual válido.")
