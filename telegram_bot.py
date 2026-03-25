@@ -42,6 +42,21 @@ def normalize_text(value: str) -> str:
     value = value.replace("\xa0", " ")
     return re.sub(r"\s+", " ", value).strip().upper()
 
+
+def parse_score_from_row(row_text: str) -> str | None:
+    """Extrae el primer porcentaje válido encontrado en una fila de tabla."""
+    matches = re.findall(r"(\d{1,3})\s*%", row_text)
+    valid = [int(x) for x in matches if 0 < int(x) <= 100]
+    if valid:
+        return f"{valid[0]}%"
+
+    matches_dec = re.findall(r"(\d{1,3})[.,]\d+", row_text)
+    valid_dec = [int(x) for x in matches_dec if 0 < int(x) <= 100]
+    if valid_dec:
+        return f"{valid_dec[0]}%"
+
+    return None
+
 # ─── Servidor web dummy (Render plan gratis necesita un puerto abierto) ───────
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -239,6 +254,78 @@ async def extract_success_rate_from_visual(page) -> str | None:
     return None
 
 
+async def find_score_in_table(page, tienda: str, visita: str) -> str | None:
+    """Busca la nota en la tabla usando la visita activa y la tienda objetivo."""
+    tienda_norm = normalize_text(tienda)
+    visita_norm = normalize_text(visita)
+    row_selectors = ["tr", "div[role='row']", "[class*='row']", "[class*='tableRow']"]
+
+    async def try_get_score_from_row(row, label: str) -> str | None:
+        try:
+            row_text = await row.inner_text(timeout=1000)
+            score = parse_score_from_row(row_text)
+            if score:
+                logger.info(f"Score encontrado en fila {label}: {score}")
+                return score
+
+            logger.info(f"Fila {label} sin % directo; intentando leer visual de Success Rate...")
+            await row.click(force=True)
+            await page.wait_for_timeout(2500)
+
+            score = await extract_success_rate_from_visual(page)
+            if score:
+                logger.info(f"Score leído tras click en fila {label}: {score}")
+                return score
+
+            page_txt = await page_text(page)
+            return parse_success_rate(page_txt)
+        except Exception as e:
+            logger.warning(f"Error procesando fila {label}: {e}")
+            return None
+
+    for frame in page.frames:
+        for selector in row_selectors:
+            try:
+                rows = frame.locator(selector)
+                count = await rows.count()
+                for i in range(count):
+                    row = rows.nth(i)
+                    try:
+                        row_text = await row.inner_text(timeout=800)
+                        row_norm = normalize_text(row_text)
+                        if tienda_norm in row_norm and visita_norm in row_norm:
+                            score = await try_get_score_from_row(row, f"{tienda}/{visita}")
+                            if score:
+                                return score
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+
+    logger.info(f"No encontré fila exacta para {tienda} + {visita}; probando solo tienda.")
+    for frame in page.frames:
+        for selector in row_selectors:
+            try:
+                rows = frame.locator(selector)
+                count = await rows.count()
+                for i in range(count):
+                    row = rows.nth(i)
+                    try:
+                        row_text = await row.inner_text(timeout=800)
+                        row_norm = normalize_text(row_text)
+                        if tienda_norm in row_norm and re.search(r"\d", row_text):
+                            score = await try_get_score_from_row(row, f"{tienda} (slicer)")
+                            if score:
+                                return score
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+
+    logger.warning(f"Sin score en tabla para {tienda} / {visita}")
+    return None
+
+
 def parse_success_rate(text: str, tienda: str = None):
     """Extrae el porcentaje del donut 'Success Rate' o de la vista general."""
     lines = [line.strip() for line in text.split("\n") if line.strip()]
@@ -358,18 +445,12 @@ async def extract_full_report() -> dict:
             await page.wait_for_timeout(3500)
             
             for tienda in TIENDAS:
-                logger.info(f"  Filtrando {tienda} haciendo click en visual...")
+                logger.info(f"  Buscando score de {tienda} en tabla...")
                 score = "Sin visita"
                 
                 try:
-                    clicked = await click_store_filter(page, tienda)
-                    if clicked:
-                        await page.wait_for_timeout(3500)
-                        
-                        parsed = await extract_success_rate_from_visual(page)
-                        if not parsed:
-                            full_text = await page_text(page)
-                            parsed = parse_success_rate(full_text)
+                    parsed = await find_score_in_table(page, tienda, visita)
+                    if parsed:
                         
                         if parsed:
                             score = parsed
