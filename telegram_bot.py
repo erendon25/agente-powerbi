@@ -34,6 +34,14 @@ MESES_ES      = {
 CHAT_ID     = None
 LAST_RECORD = None
 
+
+def normalize_text(value: str) -> str:
+    """Normaliza espacios y mayúsculas para comparar texto del DOM."""
+    if value is None:
+        return ""
+    value = value.replace("\xa0", " ")
+    return re.sub(r"\s+", " ", value).strip().upper()
+
 # ─── Servidor web dummy (Render plan gratis necesita un puerto abierto) ───────
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -132,7 +140,13 @@ async def click_slicer_option(page, label: str, option: str) -> bool:
             for i in range(cnt):
                 try:
                     rt = await items.nth(i).inner_text(timeout=400)
-                    if option.lower() in rt.lower() and "seleccionar todo" not in rt.lower() and "select all" not in rt.lower():
+                    rt_norm = normalize_text(rt)
+                    option_norm = normalize_text(option)
+                    if (
+                        option_norm in rt_norm
+                        and "SELECCIONAR TODO" not in rt_norm
+                        and "SELECT ALL" not in rt_norm
+                    ):
                         await items.nth(i).click(force=True)
                         await page.wait_for_timeout(1000)
                         
@@ -155,7 +169,11 @@ async def click_slicer_option(page, label: str, option: str) -> bool:
 async def click_store_filter(page, tienda: str) -> bool:
     """Busca un visual que contenga el nombre de la tienda (y que no sea una tabla de detalles)
     y hace click en él para filtrar el dashboard."""
-    tienda_up = tienda.upper()
+    tienda_norm = normalize_text(tienda)
+    tienda_pattern = re.compile(
+        rf"\b{re.escape(tienda).replace(r'\ ', r'\\s+')}\b",
+        re.IGNORECASE,
+    )
     for frame in page.frames:
         try:
             visuals = frame.locator(".visual-container-modern, visual-container-modern")
@@ -164,17 +182,21 @@ async def click_store_filter(page, tienda: str) -> bool:
                 try:
                     v = visuals.nth(i)
                     v_text = await v.inner_text(timeout=400)
-                    if not v_text or tienda_up not in v_text.upper():
+                    if not v_text:
                         continue
-                        
-                    v_text_lower = v_text.lower()
+
+                    v_text_norm = normalize_text(v_text)
+                    if tienda_norm not in v_text_norm:
+                        continue
+
+                    v_text_lower = v_text_norm.lower()
                     # Evitar la matriz grande de criterios que tiene las preguntas y porcentajes de 100%
                     if any(k in v_text_lower for k in ['experiencia', 'rapidez', 'frescura', 'calidad', 'apariencia', 'ambiente', '¿', 'pregunta']):
                         continue
                     
                     # Intentar hacer click en el texto usando get_by_text
                     # Se busca ignorando mayúsculas/minúsculas implícitamente
-                    targets = v.get_by_text(tienda, exact=False)
+                    targets = v.get_by_text(tienda_pattern)
                     t_cnt = await targets.count()
                     for j in range(t_cnt):
                         el = targets.nth(j)
@@ -182,11 +204,42 @@ async def click_store_filter(page, tienda: str) -> bool:
                             await el.click(force=True)
                             logger.info(f"Click en '{tienda}' realizado en visual válido.")
                             return True
+                    await v.click(force=True)
+                    logger.info(f"Click de respaldo en visual para '{tienda}'.")
+                    return True
                 except Exception:
                     continue
         except Exception as e:
             pass
     return False
+
+
+async def extract_success_rate_from_visual(page) -> str | None:
+    """Lee el porcentaje solamente desde el visual de Success Rate."""
+    for frame in page.frames:
+        try:
+            visuals = frame.locator(".visual-container-modern, visual-container-modern")
+            count = await visuals.count()
+            for i in range(count):
+                try:
+                    visual = visuals.nth(i)
+                    text = await visual.inner_text(timeout=700)
+                    text_norm = normalize_text(text)
+                    if "SUCCESS RATE" not in text_norm and "SUCESS RATE" not in text_norm:
+                        continue
+
+                    matches = re.findall(r"(\d{1,3})\s*%", text)
+                    valid = [int(x) for x in matches if 0 < int(x) <= 100]
+                    if valid:
+                        score = f"{valid[0]}%"
+                        logger.info(f"Success Rate leído desde visual: {score}")
+                        return score
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return None
+
 
 def parse_success_rate(text: str, tienda: str = None):
     """Extrae el porcentaje del donut 'Success Rate' o de la vista general."""
@@ -315,8 +368,10 @@ async def extract_full_report() -> dict:
                     if clicked:
                         await page.wait_for_timeout(3500)
                         
-                        full_text = await page_text(page)
-                        parsed = parse_success_rate(full_text)
+                        parsed = await extract_success_rate_from_visual(page)
+                        if not parsed:
+                            full_text = await page_text(page)
+                            parsed = parse_success_rate(full_text)
                         
                         if parsed:
                             score = parsed
