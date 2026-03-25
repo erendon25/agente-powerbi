@@ -170,10 +170,8 @@ async def click_store_filter(page, tienda: str) -> bool:
     """Busca un visual que contenga el nombre de la tienda (y que no sea una tabla de detalles)
     y hace click en él para filtrar el dashboard."""
     tienda_norm = normalize_text(tienda)
-    tienda_pattern = re.compile(
-        rf"\b{re.escape(tienda).replace(r'\ ', r'\\s+')}\b",
-        re.IGNORECASE,
-    )
+    tienda_regex = re.escape(tienda).replace(r"\ ", r"\s+")
+    tienda_pattern = re.compile(rf"\b{tienda_regex}\b", re.IGNORECASE)
     for frame in page.frames:
         try:
             visuals = frame.locator(".visual-container-modern, visual-container-modern")
